@@ -1,0 +1,30 @@
+# Build artifacts
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime databases & caches (generated automatically)
+*.sqlite
+*.sqlite-*
+*.db
+
+# Logs
+*.log
+lexi.log
+lexi_crash.log
+lexi_error.log
+
+# User configuration (local config may contain private API keys)
+config.toml
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+scratch/
+tmp/

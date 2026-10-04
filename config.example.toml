@@ -1,0 +1,106 @@
+# ==============================================================================
+# LEXI - Ferramenta Nativa de Dicionário e Tradução para Jogos no Windows
+# Arquivo de Configuração (config.toml)
+# ==============================================================================
+
+[bridge]
+# Endereço e porta onde o Lexi escutará as transcrições vindas do Handy
+host = "127.0.0.1"
+port = 47823
+model_name = "lexi"
+
+[lookup]
+# Modo de consulta de significados:
+# - "hybrid": Consulta primeiro o cache e o dicionário offline. Se não encontrar
+#             (ou for gíria complexa / expressão), consulta a IA automaticamente.
+# - "offline_only": Consulta apenas a base SQLite offline local (0ms de latência e sem internet).
+# - "llm_only": Consulta sempre a IA para qualquer termo.
+mode = "hybrid"
+
+# Caminhos dos bancos de dados SQLite (criados automaticamente se não existirem)
+dictionary_path = "dictionary.sqlite"
+cache_path = "cache.sqlite"
+
+[llm]
+# Configurações do modelo de Inteligência Artificial para tradução e gírias
+enabled = true
+provider = "openai" # "openai", "gemini", "groq", "openrouter", "ollama"
+
+# URL da API compatível com OpenAI:
+# - OpenAI: "https://api.openai.com/v1"
+# - Google Gemini: "https://generativelanguage.googleapis.com/v1beta/openai"
+# - Groq (ultra rápido): "https://api.groq.com/openai/v1"
+# - Ollama (local): "http://127.0.0.1:11434/v1"
+base_url = "https://api.openai.com/v1"
+
+# Sua chave de API (deixe em branco se usar Ollama local ou modo offline)
+api_key = ""
+
+# Modelo a utilizar:
+# - OpenAI: "gpt-4o-mini"
+# - Gemini: "gemini-1.5-flash"
+# - Groq: "llama-3.1-8b-instant"
+model = "gpt-4o-mini"
+
+# Tempo limite máximo de espera da resposta da IA (em segundos)
+timeout_seconds = 5
+
+[dismiss]
+# Como a janelinha (overlay) é dispensada da tela:
+# - "release_key": Fecha assim que você soltar o dedo da tecla do teclado (muito prático!).
+# - "timeout": Fecha automaticamente após o tempo limite definido em 'timeout_seconds'.
+# - "hotkey": Fecha somente quando você pressionar a tecla de fechar ('dismiss_hotkey').
+# - "any_key": Fecha assim que você apertar qualquer tecla (sem roubar a ação do jogo).
+# - "hybrid": Fecha se você soltar a tecla, se der o tempo limite ou se apertar Esc.
+mode = "hybrid"
+
+# Tempo de exibição antes do fechamento automático (em segundos)
+timeout_seconds = 8.0
+
+# Tecla rápida para fechar o card manualmente a qualquer momento
+dismiss_hotkey = "Escape"
+
+# Tecla a ser observada para o modo 'release_key' (ex: F13, CapsLock, etc.)
+trigger_key_to_watch = "F13"
+
+[overlay]
+# Exibir o card visual sobre o jogo
+enabled = true
+
+# Posição na tela do monitor ativo:
+# - "top_center": Topo centralizado (recomendado, longe das legendas e mira)
+# - "middle_left": Centro-esquerda da tela
+# - "middle_right": Centro-direita da tela
+# - "top_right": Canto superior direito
+# - "top_left": Canto superior esquerdo
+# - "center": Centro da tela
+# - "bottom_center": Parte inferior centralizada
+position = "top_center"
+
+# Dimensões da janela em pixels
+width = 440
+max_height = 240
+
+# Tipografia e estilo
+font_family = "Segoe UI"
+font_size = 15
+opacity = 0.94 # Transparência do fundo escuro (0.0 a 1.0)
+fade_duration_ms = 120
+
+[audio]
+# Leitura em voz alta via sintetizador nativo do Windows (TTS):
+# Essencial para jogos em TELA CHEIA EXCLUSIVA onde o overlay visual não pode sobrepor o jogo!
+enabled = false
+
+# Se ativado como 'true', só falará no áudio caso o jogo esteja em tela cheia exclusiva.
+# Se 'false' (padrão), falará sempre (ótimo para quem joga em modo janela / sem bordas).
+only_fullscreen = false
+
+# Voz padrão em Português do Brasil (utiliza as vozes SAPI instaladas no Windows)
+voice = "pt-BR"
+
+# Volume de 0 a 100
+volume = 85
+
+# Velocidade da fala (-10 a 10, sendo 0 o padrão e 1 levemente mais ágil)
+rate = 1
