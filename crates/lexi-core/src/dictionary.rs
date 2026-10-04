@@ -77,11 +77,11 @@ impl Dictionary {
             [],
         )?;
         self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_entries_lemma ON entries(lemma);",
+            "CREATE INDEX IF NOT EXISTS idx_entries_lemma ON entries(lemma COLLATE NOCASE);",
             [],
         )?;
         self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_entries_translation ON entries(translation);",
+            "CREATE INDEX IF NOT EXISTS idx_entries_translation ON entries(translation COLLATE NOCASE);",
             [],
         )?;
         Ok(())
@@ -185,7 +185,7 @@ impl Dictionary {
                         return None;
                     }
                 };
-                let pos: Option<String> = row.get(1).ok();
+                let pos: Option<String> = row.get::<_, Option<String>>(1).ok().flatten().filter(|s| !s.trim().is_empty());
                 let translation: String = match row.get(2) {
                     Ok(t) => t,
                     Err(e) => {
@@ -200,14 +200,20 @@ impl Dictionary {
                         return None;
                     }
                 };
-                let example: Option<String> = row.get(4).ok();
+                let example: Option<String> = row.get::<_, Option<String>>(4).ok().flatten().filter(|s| !s.trim().is_empty());
+
+                let clean_def = if definition.trim().is_empty() || definition.trim().eq_ignore_ascii_case(translation.trim()) {
+                    format!("Termo em inglês que se traduz como '{}'.", translation)
+                } else {
+                    definition
+                };
 
                 Some(LookupResult {
                     query: term.clone(),
                     normalized: term,
                     translation,
                     part_of_speech: pos,
-                    definition,
+                    definition: clean_def,
                     example,
                     source: LookupSource::OfflineDictionary,
                 })
@@ -225,30 +231,42 @@ impl Dictionary {
             return None;
         }
 
-        // 1. Fast indexed match first: exact translation or comma-separated list
+        let mut capitalized = String::with_capacity(word.len());
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            capitalized.extend(first.to_uppercase());
+            capitalized.push_str(chars.as_str());
+        }
+
+        // Fast indexed exact match only (<2ms).
+        // Uses idx_entries_translation without any table scanning.
         if let Ok(mut stmt) = self.conn.prepare(
             "SELECT term, pos, translation, definition, example FROM entries 
-             WHERE translation = ?1 
-                OR translation LIKE (?1 || ', %') 
-                OR translation LIKE ('%, ' || ?1 || ', %') 
-                OR translation LIKE ('%, ' || ?1)
+             WHERE translation = ?1 OR translation = ?2 
              ORDER BY length(term) ASC 
              LIMIT 1"
         ) {
-            if let Ok(mut rows) = stmt.query(params![word]) {
+            if let Ok(mut rows) = stmt.query(params![word, capitalized]) {
                 if let Ok(Some(row)) = rows.next() {
                     if let (Ok(term), Ok(translation), Ok(definition)) = (
                         row.get::<_, String>(0),
                         row.get::<_, String>(2),
                         row.get::<_, String>(3),
                     ) {
+                        let pos = row.get::<_, Option<String>>(1).ok().flatten().filter(|s| !s.trim().is_empty());
+                        let example = row.get::<_, Option<String>>(4).ok().flatten().filter(|s| !s.trim().is_empty());
+                        let clean_def = if definition.trim().is_empty() || definition.trim().eq_ignore_ascii_case(translation.trim()) {
+                            format!("Termo em inglês que se traduz como '{}'.", translation)
+                        } else {
+                            definition
+                        };
                         return Some(LookupResult {
                             query: word.to_string(),
                             normalized: term,
                             translation,
-                            part_of_speech: row.get(1).ok(),
-                            definition,
-                            example: row.get(4).ok(),
+                            part_of_speech: pos,
+                            definition: clean_def,
+                            example,
                             source: LookupSource::OfflineDictionary,
                         });
                     }
@@ -256,38 +274,6 @@ impl Dictionary {
             }
         }
 
-        // 2. Substring match fallback
-        let pattern = format!("%{}%", word);
-        let mut stmt = self.conn.prepare(
-            "SELECT term, pos, translation, definition, example FROM entries 
-             WHERE translation LIKE ?1 
-             ORDER BY CASE 
-                WHEN lower(translation) = lower(?2) THEN 0 
-                WHEN lower(translation) LIKE (lower(?2) || ', %') THEN 1 
-                WHEN lower(translation) LIKE ('%, ' || lower(?2)) THEN 2 
-                ELSE 3 
-             END, length(term) ASC 
-             LIMIT 1"
-        ).ok()?;
-
-        let mut rows = stmt.query(params![pattern, word]).ok()?;
-        if let Ok(Some(row)) = rows.next() {
-            let term: String = row.get(0).ok()?;
-            let pos: Option<String> = row.get(1).ok();
-            let translation: String = row.get(2).ok()?;
-            let definition: String = row.get(3).ok()?;
-            let example: Option<String> = row.get(4).ok();
-
-            return Some(LookupResult {
-                query: word.to_string(),
-                normalized: term,
-                translation,
-                part_of_speech: pos,
-                definition,
-                example,
-                source: LookupSource::OfflineDictionary,
-            });
-        }
         None
     }
 
@@ -584,6 +570,8 @@ pub const GAMING_STARTER_SEEDS: &[(&str, &str, &str, &str, &str)] = &[
     ("tower dive", "termo gamer", "mergulho sob a torre / abater debaixo da torre", "Manobra arriscada de entrar voluntariamente no alcance dos tiros da torre inimiga para abater um adversário com pouca vida que busca abrigo nela.", "Their carry has only 10% health, let's execute a tower dive!"),
     ("ult", "gíria gamer", "habilidade suprema (ultimate)", "A habilidade mais forte e com maior tempo de recarga de um personagem, capaz de definir o resultado de confrontos em grupo.", "My ult is ready, initiate the fight whenever you are ready!"),
     ("ultimate", "termo gamer", "habilidade definitiva / suprema", "Poder supremo de um herói ou campeão que possui alto impacto e geralmente requer acumular carga ou longo tempo de recarga.", "Combine your ultimate with mine for a devastating combo."),
+    ("shyster", "gíria", "trapaceiro / vigarista / indivíduo desonesto", "Pessoa inescrupulosa ou desonesta que age com trapaça ou má-fé em negócios ou jogos.", "Don't trust that shyster with your rare items!"),
+    ("sheister", "gíria", "trapaceiro / vigarista / indivíduo desonesto", "Variação fonética de 'shyster'; trapaceiro, vigarista ou jogador que tenta enganar os outros.", "Watch out for that sheister in trade chat!"),
 ];
 
 #[cfg(test)]

@@ -267,19 +267,24 @@ impl OverlayManager {
             );
 
             // Measure elements
+            let original_font = SelectObject(mem_dc, query_font);
             let mut query_wide = to_wide_chars(&result.normalized.to_uppercase());
             let mut q_rc = RECT { left: 0, top: 0, right: content_w, bottom: 0 };
-            SelectObject(mem_dc, query_font);
             DrawTextW(mem_dc, &mut query_wide, &mut q_rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
             let query_w = q_rc.right - q_rc.left;
             let query_h = q_rc.bottom - q_rc.top;
 
             let (badge_w, badge_h, badge_wide) = if let Some(ref pos) = result.part_of_speech {
-                let mut b_wide = to_wide_chars(&pos.to_uppercase());
-                let mut b_rc = RECT { left: 0, top: 0, right: content_w, bottom: 0 };
-                SelectObject(mem_dc, badge_font);
-                DrawTextW(mem_dc, &mut b_wide, &mut b_rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
-                (b_rc.right - b_rc.left, b_rc.bottom - b_rc.top, Some(b_wide))
+                let trimmed = pos.trim();
+                if !trimmed.is_empty() {
+                    let mut b_wide = to_wide_chars(&trimmed.to_uppercase());
+                    let mut b_rc = RECT { left: 0, top: 0, right: content_w, bottom: 0 };
+                    SelectObject(mem_dc, badge_font);
+                    DrawTextW(mem_dc, &mut b_wide, &mut b_rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+                    (b_rc.right - b_rc.left, b_rc.bottom - b_rc.top, Some(b_wide))
+                } else {
+                    (0, 0, None)
+                }
             } else {
                 (0, 0, None)
             };
@@ -295,18 +300,28 @@ impl OverlayManager {
             DrawTextW(mem_dc, &mut trans_wide, &mut t_rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             let trans_h = (t_rc.bottom - t_rc.top).max((22.0 * dpi_scale) as i32);
 
-            let mut def_wide = to_wide_chars(&result.definition);
+            let def_text = if result.definition.trim().is_empty() {
+                &result.translation
+            } else {
+                &result.definition
+            };
+            let mut def_wide = to_wide_chars(def_text);
             let mut d_rc = RECT { left: 0, top: 0, right: content_w, bottom: 0 };
             SelectObject(mem_dc, body_font);
             DrawTextW(mem_dc, &mut def_wide, &mut d_rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             let def_h = (d_rc.bottom - d_rc.top).max((18.0 * dpi_scale) as i32);
 
             let (ex_h, ex_wide) = if let Some(ref ex) = result.example {
-                let mut e_wide = to_wide_chars(&format!("Ex: {}", ex));
-                let mut e_rc = RECT { left: 0, top: 0, right: content_w, bottom: 0 };
-                SelectObject(mem_dc, example_font);
-                DrawTextW(mem_dc, &mut e_wide, &mut e_rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-                ((e_rc.bottom - e_rc.top).max((16.0 * dpi_scale) as i32), Some(e_wide))
+                let trimmed = ex.trim();
+                if !trimmed.is_empty() {
+                    let mut e_wide = to_wide_chars(&format!("Ex: {}", trimmed));
+                    let mut e_rc = RECT { left: 0, top: 0, right: content_w, bottom: 0 };
+                    SelectObject(mem_dc, example_font);
+                    DrawTextW(mem_dc, &mut e_wide, &mut e_rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+                    ((e_rc.bottom - e_rc.top).max((16.0 * dpi_scale) as i32), Some(e_wide))
+                } else {
+                    (0, None)
+                }
             } else {
                 (0, None)
             };
@@ -368,11 +383,33 @@ impl OverlayManager {
                 Ok(b) => b,
                 Err(e) => {
                     log::warn!("CreateDIBSection failed: {e}");
+                    SelectObject(mem_dc, original_font);
+                    let _ = DeleteObject(query_font);
+                    let _ = DeleteObject(badge_font);
+                    let _ = DeleteObject(trans_font);
+                    let _ = DeleteObject(body_font);
+                    let _ = DeleteObject(example_font);
+                    let _ = DeleteObject(footer_font);
                     let _ = DeleteDC(mem_dc);
                     ReleaseDC(HWND(null_mut()), screen_dc);
                     return;
                 }
             };
+
+            if bits.is_null() || width <= 0 || height <= 0 {
+                log::warn!("CreateDIBSection returned null bits or invalid dimensions: {}x{}", width, height);
+                SelectObject(mem_dc, original_font);
+                let _ = DeleteObject(query_font);
+                let _ = DeleteObject(badge_font);
+                let _ = DeleteObject(trans_font);
+                let _ = DeleteObject(body_font);
+                let _ = DeleteObject(example_font);
+                let _ = DeleteObject(footer_font);
+                let _ = DeleteObject(bitmap);
+                let _ = DeleteDC(mem_dc);
+                ReleaseDC(HWND(null_mut()), screen_dc);
+                return;
+            }
 
             let old_bitmap = SelectObject(mem_dc, bitmap);
             let pixel_count = (width * height) as usize;
@@ -402,10 +439,15 @@ impl OverlayManager {
                 | (((highlight_g as u32 * highlight_a as u32 + 127) / 255) << 8)
                 | ((highlight_b as u32 * highlight_a as u32 + 127) / 255);
 
-            for y in 0..top_border_h {
-                for x in corner_radius..(width - corner_radius) {
-                    let idx = (y * width + x) as usize;
-                    slice[idx] = highlight_pixel;
+            for y in 0..top_border_h.min(height) {
+                let x_start = corner_radius.clamp(0, width);
+                let x_end = (width - corner_radius).clamp(0, width);
+                let row_off = (y * width) as usize;
+                for x in x_start..x_end {
+                    let idx = row_off + (x as usize);
+                    if idx < pixel_count {
+                        slice[idx] = highlight_pixel;
+                    }
                 }
             }
 
@@ -435,8 +477,14 @@ impl OverlayManager {
                 | ((59 * sep_alpha + 127) / 255);
 
             if sep_y > 0 && sep_y < height {
-                for x in pad_x..(width - pad_x) {
-                    slice[(sep_y * width + x) as usize] = sep_pixel;
+                let x_start = pad_x.clamp(0, width);
+                let x_end = (width - pad_x).clamp(0, width);
+                let row_off = (sep_y * width) as usize;
+                for x in x_start..x_end {
+                    let idx = row_off + (x as usize);
+                    if idx < pixel_count {
+                        slice[idx] = sep_pixel;
+                    }
                 }
             }
 
@@ -470,15 +518,17 @@ impl OverlayManager {
 
             // 1b. Header Part of Speech Badge
             if let Some(mut b_wide) = badge_wide {
-                SelectObject(mem_dc, badge_font);
-                SetTextColor(mem_dc, rgb(199, 210, 254)); // Indigo-200
-                let mut draw_b_rc = RECT {
-                    left: pill_x0,
-                    top: pill_y0,
-                    right: pill_x0 + badge_pill_w,
-                    bottom: pill_y0 + badge_pill_h,
-                };
-                DrawTextW(mem_dc, &mut b_wide, &mut draw_b_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                if !b_wide.is_empty() {
+                    SelectObject(mem_dc, badge_font);
+                    SetTextColor(mem_dc, rgb(199, 210, 254)); // Indigo-200
+                    let mut draw_b_rc = RECT {
+                        left: pill_x0,
+                        top: pill_y0,
+                        right: (pill_x0 + badge_pill_w).min(width),
+                        bottom: (pill_y0 + badge_pill_h).min(height),
+                    };
+                    DrawTextW(mem_dc, &mut b_wide, &mut draw_b_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                }
             }
 
             cur_y += header_row_h + gap;
@@ -500,19 +550,20 @@ impl OverlayManager {
             SelectObject(mem_dc, body_font);
             SetTextColor(mem_dc, rgb(226, 232, 240)); // Slate-200
             let max_def_bottom = sep_y - (6.0 * dpi_scale) as i32;
-            let mut draw_d_rc = RECT {
-                left: pad_x,
-                top: cur_y,
-                right: width - pad_x,
-                bottom: max_def_bottom,
-            };
-            let actual_def_h = DrawTextW(mem_dc, &mut def_wide, &mut draw_d_rc, DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
-
-            cur_y += actual_def_h + gap;
+            if cur_y < max_def_bottom {
+                let mut draw_d_rc = RECT {
+                    left: pad_x,
+                    top: cur_y,
+                    right: width - pad_x,
+                    bottom: max_def_bottom,
+                };
+                let actual_def_h = DrawTextW(mem_dc, &mut def_wide, &mut draw_d_rc, DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
+                cur_y += actual_def_h.max(0) + gap;
+            }
 
             // 4. Example (if present, italicized with "Ex:" prefix in slate-400)
             if let Some(mut e_wide) = ex_wide {
-                if cur_y < max_def_bottom {
+                if !e_wide.is_empty() && cur_y < max_def_bottom {
                     SelectObject(mem_dc, example_font);
                     SetTextColor(mem_dc, rgb(148, 163, 184)); // Slate-400
                     let mut draw_e_rc = RECT {
@@ -537,16 +588,16 @@ impl OverlayManager {
             DrawTextW(mem_dc, &mut hint_wide, &mut draw_f_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
             // Fix alpha channel premultiplication for layered window
-            // Any pixel modified by GDI text rendering is set to full opacity (A=255)
-            // ensuring smooth, crisp rendering over fullscreen games without dark borders.
             for i in 0..pixel_count {
-                let current_rgb = slice[i] & 0x00FF_FFFF;
-                let initial_rgb = bg_snapshot[i] & 0x00FF_FFFF;
-                if current_rgb != initial_rgb {
-                    let r = (current_rgb >> 16) & 0xFF;
-                    let g = (current_rgb >> 8) & 0xFF;
-                    let b = current_rgb & 0xFF;
-                    slice[i] = (255 << 24) | (r << 16) | (g << 8) | b;
+                if i < slice.len() && i < bg_snapshot.len() {
+                    let current_rgb = slice[i] & 0x00FF_FFFF;
+                    let initial_rgb = bg_snapshot[i] & 0x00FF_FFFF;
+                    if current_rgb != initial_rgb {
+                        let r = (current_rgb >> 16) & 0xFF;
+                        let g = (current_rgb >> 8) & 0xFF;
+                        let b = current_rgb & 0xFF;
+                        slice[i] = (255 << 24) | (r << 16) | (g << 8) | b;
+                    }
                 }
             }
 
@@ -574,7 +625,8 @@ impl OverlayManager {
 
             let _ = ShowWindow(HWND(self.hwnd as *mut _), SW_SHOWNOACTIVATE);
 
-            // Clean up GDI objects
+            // Clean up GDI objects deterministically
+            SelectObject(mem_dc, original_font);
             let _ = DeleteObject(query_font);
             let _ = DeleteObject(badge_font);
             let _ = DeleteObject(trans_font);
@@ -635,6 +687,14 @@ impl OverlayManager {
                 }
             };
 
+            if bits.is_null() || width <= 0 || height <= 0 {
+                log::warn!("CreateDIBSection for toast returned null bits or invalid dimensions");
+                let _ = DeleteObject(bitmap);
+                let _ = DeleteDC(mem_dc);
+                ReleaseDC(HWND(null_mut()), screen_dc);
+                return;
+            }
+
             let old_bitmap = SelectObject(mem_dc, bitmap);
             let pixel_count = (width * height) as usize;
             let slice = std::slice::from_raw_parts_mut(bits as *mut u32, pixel_count);
@@ -663,8 +723,9 @@ impl OverlayManager {
                 PCWSTR(font_name.as_ptr()),
             );
 
+            let old_font = SelectObject(mem_dc, badge_font);
+
             // Icon / App badge
-            SelectObject(mem_dc, badge_font);
             SetTextColor(mem_dc, rgb(52, 211, 153)); // Emerald-400
             let mut icon_wide = to_wide_chars("✓ LEXI");
             let icon_pad_x = (18.0 * dpi_scale).round() as i32;
@@ -690,13 +751,15 @@ impl OverlayManager {
             DrawTextW(mem_dc, &mut msg_wide, &mut msg_rc, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
             for i in 0..pixel_count {
-                let current_rgb = slice[i] & 0x00FF_FFFF;
-                let initial_rgb = bg_snapshot[i] & 0x00FF_FFFF;
-                if current_rgb != initial_rgb {
-                    let r = (current_rgb >> 16) & 0xFF;
-                    let g = (current_rgb >> 8) & 0xFF;
-                    let b = current_rgb & 0xFF;
-                    slice[i] = (255 << 24) | (r << 16) | (g << 8) | b;
+                if i < slice.len() && i < bg_snapshot.len() {
+                    let current_rgb = slice[i] & 0x00FF_FFFF;
+                    let initial_rgb = bg_snapshot[i] & 0x00FF_FFFF;
+                    if current_rgb != initial_rgb {
+                        let r = (current_rgb >> 16) & 0xFF;
+                        let g = (current_rgb >> 8) & 0xFF;
+                        let b = current_rgb & 0xFF;
+                        slice[i] = (255 << 24) | (r << 16) | (g << 8) | b;
+                    }
                 }
             }
 
@@ -724,6 +787,7 @@ impl OverlayManager {
 
             let _ = ShowWindow(HWND(self.hwnd as *mut _), SW_SHOWNOACTIVATE);
 
+            SelectObject(mem_dc, old_font);
             let _ = DeleteObject(badge_font);
             let _ = DeleteObject(msg_font);
             SelectObject(mem_dc, old_bitmap);
@@ -786,6 +850,10 @@ fn draw_rounded_box(
     fill_color: (u8, u8, u8, u8),
     border_color: (u8, u8, u8, u8),
 ) {
+    if w <= 0 || h <= 0 || slice.len() < (w * h) as usize {
+        return;
+    }
+
     let (fr, fg, fb, fa) = fill_color;
     let (br, bg, bb, ba) = border_color;
     let fill_pixel = ((fa as u32) << 24)
@@ -799,23 +867,33 @@ fn draw_rounded_box(
 
     let box_w = rx1 - rx0;
     let box_h = ry1 - ry0;
+    if box_w <= 0 || box_h <= 0 {
+        return;
+    }
     let r = radius.min(box_w / 2).min(box_h / 2).max(1);
 
-    for y in ry0..ry1 {
-        if y < 0 || y >= h { continue; }
-        for x in rx0..rx1 {
-            if x < 0 || x >= w { continue; }
+    let y_start = ry0.clamp(0, h);
+    let y_end = ry1.clamp(0, h);
+    let x_start = rx0.clamp(0, w);
+    let x_end = rx1.clamp(0, w);
+    let total_pixels = slice.len();
+
+    for y in y_start..y_end {
+        let dy = if y < ry0 + r {
+            (ry0 + r - 1) - y
+        } else if y >= ry1 - r {
+            y - (ry1 - r)
+        } else {
+            0
+        };
+
+        let row_offset = (y * w) as usize;
+
+        for x in x_start..x_end {
             let dx = if x < rx0 + r {
                 (rx0 + r - 1) - x
             } else if x >= rx1 - r {
                 x - (rx1 - r)
-            } else {
-                0
-            };
-            let dy = if y < ry0 + r {
-                (ry0 + r - 1) - y
-            } else if y >= ry1 - r {
-                y - (ry1 - r)
             } else {
                 0
             };
@@ -825,7 +903,11 @@ fn draw_rounded_box(
                 continue;
             }
 
-            let idx = (y * w + x) as usize;
+            let idx = row_offset + (x as usize);
+            if idx >= total_pixels {
+                continue;
+            }
+
             let is_edge = (dist_sq >= (r - 1) * (r - 1) && (dx > 0 || dy > 0))
                 || x == rx0 || x == rx1 - 1 || y == ry0 || y == ry1 - 1;
 
@@ -842,7 +924,11 @@ fn draw_rounded_box(
 fn to_wide_chars(s: &str) -> Vec<u16> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    OsStr::new(s).encode_wide().collect()
+    let mut v: Vec<u16> = OsStr::new(s).encode_wide().collect();
+    if v.is_empty() {
+        v.push(0);
+    }
+    v
 }
 
 #[cfg(windows)]

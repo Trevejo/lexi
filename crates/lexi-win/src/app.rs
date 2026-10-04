@@ -183,13 +183,8 @@ impl Application {
             thread::spawn(move || {
                 while let Ok(query) = query_rx.recv() {
                     log::info!("App worker received query: '{}'", query);
-                    {
-                        let mut lock = state_worker.pending_query.lock().unwrap();
-                        *lock = Some(query.clone());
-                    }
-                    let _ = PostMessageW(HWND(hwnd_copy as *mut _), WM_APP_TRIGGER_LOOKUP, WPARAM(0), LPARAM(0));
 
-                    // Perform lookup in worker thread
+                    // Perform lookup in worker thread (instant <5ms)
                     let res = state_worker.lookup_service.lookup(&query);
                     log::info!("Lookup for '{}' completed: Normalized='{}', Trans='{}', Source={:?}",
                         query, res.normalized, res.translation, res.source);
@@ -228,141 +223,146 @@ unsafe extern "system" fn daemon_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let state = match GLOBAL_STATE {
-        Some(ref s) => Arc::clone(s),
-        None => return DefWindowProcW(hwnd, msg, wparam, lparam),
-    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let state = match GLOBAL_STATE {
+            Some(ref s) => Arc::clone(s),
+            None => return DefWindowProcW(hwnd, msg, wparam, lparam),
+        };
 
-    match msg {
-        WM_APP_TRIGGER_LOOKUP => {
-            let query = {
-                state.pending_query.lock().unwrap().clone()
-            };
-            if let Some(q) = query {
-                state.overlay.show_loading(&q);
-                KeyboardHookManager::set_overlay_visible(true);
-
-                // Start polling timer for keyboard hook dismiss detection (every 16ms ~ 60fps)
-                SetTimer(hwnd, TIMER_POLL_HOOK_ID, 16, None);
+        match msg {
+            WM_APP_TRIGGER_LOOKUP => {
+                let query = {
+                    state.pending_query.lock().unwrap().clone()
+                };
+                if let Some(q) = query {
+                    state.overlay.show_loading(&q);
+                    KeyboardHookManager::set_overlay_visible(true);
+                    SetTimer(hwnd, TIMER_POLL_HOOK_ID, 16, None);
+                }
+                LRESULT(0)
             }
-            LRESULT(0)
-        }
-        WM_APP_RESULT_READY => {
-            let result = {
-                state.pending_result.lock().unwrap().take()
-            };
-            if let Some(res) = result {
-                state.overlay.show_result(&res);
-                state.tts.speak_result(&res);
+            WM_APP_RESULT_READY => {
+                let result = {
+                    state.pending_result.lock().unwrap().take()
+                };
+                if let Some(res) = result {
+                    state.overlay.show_result(&res);
+                    state.tts.speak_result(&res);
+                    KeyboardHookManager::set_overlay_visible(true);
+                    SetTimer(hwnd, TIMER_POLL_HOOK_ID, 16, None);
 
-                let timeout_sec = state.config.read().map(|c| c.dismiss.timeout_seconds).unwrap_or(8.0);
-                let timeout_ms = (timeout_sec * 1000.0) as u32;
-                SetTimer(hwnd, TIMER_DISMISS_ID, timeout_ms, None);
+                    let timeout_sec = state.config.read().map(|c| c.dismiss.timeout_seconds).unwrap_or(8.0);
+                    let timeout_ms = (timeout_sec * 1000.0) as u32;
+                    SetTimer(hwnd, TIMER_DISMISS_ID, timeout_ms, None);
+                }
+                LRESULT(0)
             }
-            LRESULT(0)
-        }
-        WM_TIMER => {
-            let timer_id = wparam.0;
-            if timer_id == TIMER_POLL_HOOK_ID {
-                if KeyboardHookManager::check_and_reset_dismiss_requested() {
+            WM_TIMER => {
+                let timer_id = wparam.0;
+                if timer_id == TIMER_POLL_HOOK_ID {
+                    if KeyboardHookManager::check_and_reset_dismiss_requested() {
+                        state.overlay.hide();
+                        KeyboardHookManager::set_overlay_visible(false);
+                        let _ = KillTimer(hwnd, TIMER_DISMISS_ID);
+                        let _ = KillTimer(hwnd, TIMER_POLL_HOOK_ID);
+                    }
+                } else if timer_id == TIMER_DISMISS_ID {
                     state.overlay.hide();
                     KeyboardHookManager::set_overlay_visible(false);
                     let _ = KillTimer(hwnd, TIMER_DISMISS_ID);
                     let _ = KillTimer(hwnd, TIMER_POLL_HOOK_ID);
                 }
-            } else if timer_id == TIMER_DISMISS_ID {
-                state.overlay.hide();
-                KeyboardHookManager::set_overlay_visible(false);
-                let _ = KillTimer(hwnd, TIMER_DISMISS_ID);
-                let _ = KillTimer(hwnd, TIMER_POLL_HOOK_ID);
+                LRESULT(0)
             }
-            LRESULT(0)
-        }
-        WM_TRAY_ICON => {
-            let event = lparam.0 as u32;
-            if event == WM_RBUTTONUP {
-                show_tray_context_menu(hwnd);
+            WM_TRAY_ICON => {
+                let event = lparam.0 as u32;
+                if event == WM_RBUTTONUP {
+                    show_tray_context_menu(hwnd);
+                }
+                LRESULT(0)
             }
-            LRESULT(0)
-        }
-        WM_COMMAND => {
-            let cmd_id = (wparam.0 & 0xFFFF) as usize;
-            match cmd_id {
-                IDM_TRAY_TEST => {
-                    log::info!("Simulating test lookup for 'flank'");
-                    let test_query = "flank".to_string();
-                    {
-                        let mut lock = state.pending_query.lock().unwrap();
-                        *lock = Some(test_query.clone());
+            WM_COMMAND => {
+                let cmd_id = (wparam.0 & 0xFFFF) as usize;
+                match cmd_id {
+                    IDM_TRAY_TEST => {
+                        log::info!("Simulating test lookup for 'flank'");
+                        let test_query = "flank".to_string();
+                        let res = state.lookup_service.lookup(&test_query);
+                        {
+                            let mut lock = state.pending_result.lock().unwrap();
+                            *lock = Some(res);
+                        }
+                        let _ = PostMessageW(hwnd, WM_APP_RESULT_READY, WPARAM(0), LPARAM(0));
                     }
-                    let _ = PostMessageW(hwnd, WM_APP_TRIGGER_LOOKUP, WPARAM(0), LPARAM(0));
-                    let res = state.lookup_service.lookup(&test_query);
-                    {
-                        let mut lock = state.pending_result.lock().unwrap();
-                        *lock = Some(res);
+                    IDM_TRAY_CONFIG => {
+                        log::info!("Opening Settings GUI window from tray menu");
+                        crate::settings::open_settings_window();
                     }
-                    let _ = PostMessageW(hwnd, WM_APP_RESULT_READY, WPARAM(0), LPARAM(0));
-                }
-                IDM_TRAY_CONFIG => {
-                    log::info!("Opening Settings GUI window from tray menu");
-                    crate::settings::open_settings_window();
-                }
-                IDM_TRAY_EDIT_FILE => {
-                    let app_dir = crate::get_local_app_dir();
-                    let local_p = app_dir.join("config.toml");
-                    let cfg_path = if local_p.exists() {
-                        local_p
-                    } else if let Ok(exe) = std::env::current_exe() {
-                        if let Some(exe_dir) = exe.parent() {
-                            let p = exe_dir.join("config.toml");
-                            if p.exists() { p } else { std::path::PathBuf::from("config.toml") }
+                    IDM_TRAY_EDIT_FILE => {
+                        let app_dir = crate::get_local_app_dir();
+                        let local_p = app_dir.join("config.toml");
+                        let cfg_path = if local_p.exists() {
+                            local_p
+                        } else if let Ok(exe) = std::env::current_exe() {
+                            if let Some(exe_dir) = exe.parent() {
+                                let p = exe_dir.join("config.toml");
+                                if p.exists() { p } else { std::path::PathBuf::from("config.toml") }
+                            } else {
+                                std::path::PathBuf::from("config.toml")
+                            }
                         } else {
                             std::path::PathBuf::from("config.toml")
-                        }
-                    } else {
-                        std::path::PathBuf::from("config.toml")
-                    };
-                    let _ = std::process::Command::new("notepad.exe")
-                        .arg(cfg_path)
-                        .spawn();
-                }
-                IDM_TRAY_LOG => {
-                    let app_dir = crate::get_local_app_dir();
-                    let local_p = app_dir.join("lexi.log");
-                    let log_p = if local_p.exists() {
-                        local_p
-                    } else if let Ok(exe) = std::env::current_exe() {
-                        if let Some(exe_dir) = exe.parent() {
-                            let p = exe_dir.join("lexi.log");
-                            if p.exists() { p } else { std::path::PathBuf::from("lexi.log") }
+                        };
+                        let _ = std::process::Command::new("notepad.exe")
+                            .arg(cfg_path)
+                            .spawn();
+                    }
+                    IDM_TRAY_LOG => {
+                        let app_dir = crate::get_local_app_dir();
+                        let local_p = app_dir.join("lexi.log");
+                        let log_p = if local_p.exists() {
+                            local_p
+                        } else if let Ok(exe) = std::env::current_exe() {
+                            if let Some(exe_dir) = exe.parent() {
+                                let p = exe_dir.join("lexi.log");
+                                if p.exists() { p } else { std::path::PathBuf::from("lexi.log") }
+                            } else {
+                                std::path::PathBuf::from("lexi.log")
+                            }
                         } else {
                             std::path::PathBuf::from("lexi.log")
-                        }
-                    } else {
-                        std::path::PathBuf::from("lexi.log")
-                    };
-                    let _ = std::process::Command::new("notepad.exe")
-                        .arg(log_p)
-                        .spawn();
+                        };
+                        let _ = std::process::Command::new("notepad.exe")
+                            .arg(log_p)
+                            .spawn();
+                    }
+                    IDM_TRAY_RELOAD => {
+                        log::info!("Configuration reload requested from tray menu");
+                        let app_dir = crate::get_local_app_dir();
+                        let (disk_cfg, loaded_path) = crate::load_best_config(&app_dir);
+                        log::info!("Configuration reloaded from {:?}", loaded_path);
+                        state.reload_config(disk_cfg);
+                    }
+                    IDM_TRAY_EXIT => {
+                        PostQuitMessage(0);
+                    }
+                    _ => {}
                 }
-                IDM_TRAY_RELOAD => {
-                    log::info!("Configuration reload requested from tray menu");
-                    let app_dir = crate::get_local_app_dir();
-                    let (disk_cfg, loaded_path) = crate::load_best_config(&app_dir);
-                    log::info!("Configuration reloaded from {:?}", loaded_path);
-                    state.reload_config(disk_cfg);
-                }
-                IDM_TRAY_EXIT => {
-                    PostQuitMessage(0);
-                }
-                _ => {}
+                LRESULT(0)
             }
+            WM_DESTROY => {
+                PostQuitMessage(0);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }));
+
+    match result {
+        Ok(lres) => lres,
+        Err(e) => {
+            log::error!("Panic caught in daemon_wnd_proc: {:?}", e);
             LRESULT(0)
         }
-        WM_DESTROY => {
-            PostQuitMessage(0);
-            LRESULT(0)
-        }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }

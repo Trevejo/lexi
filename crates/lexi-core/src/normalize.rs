@@ -32,10 +32,54 @@ pub fn normalize_query(input: &str) -> String {
         }
     }
 
-    // 3. Strip vocal fillers
-    for filler in &["um, ", "um ", "uh, ", "uh ", "tipo, ", "tipo ", "like, ", "like ", "então, ", "entao, "] {
-        if text.starts_with(filler) {
-            text = text[filler.len()..].trim().to_string();
+    // 3. Iteratively strip vocal and conversational fillers, prompt preambles and punctuation
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let before = text.clone();
+
+        // Trailing conversational suffixes / fillers
+        for filler in &[
+            " please", " por favor", " pra mim", " para mim",
+            " yeah", " yea", " yes", " ok", " okay",
+            " man", " bro", " dude",
+            " mano", " cara", " vei", " véi",
+            " né", " ne", " sabe", " hein", " tipo", " entende",
+        ] {
+            if text.ends_with(filler) {
+                text = text[..text.len() - filler.len()].trim().to_string();
+                changed = true;
+                break;
+            }
+        }
+
+        // Leading conversational prefixes / fillers
+        for filler in &[
+            "um, ", "um ", "uh, ", "uh ", "er, ", "er ", "ah, ", "ah ",
+            "tipo, ", "tipo ", "like, ", "like ",
+            "então, ", "então ", "entao, ", "entao ",
+            "yeah, ", "yeah ", "yea, ", "yea ", "yes, ", "yes ",
+            "ok, ", "ok ", "okay, ", "okay ",
+            "mano, ", "mano ", "cara, ", "cara ",
+            "ei, ", "ei ", "hey, ", "hey ", "ow, ", "ow ",
+            "well, ", "well ", "so, ", "so ",
+        ] {
+            if text.starts_with(filler) {
+                text = text[filler.len()..].trim().to_string();
+                changed = true;
+                break;
+            }
+        }
+
+        // Punctuation and quotes stripping
+        text = text.trim_matches(|c: char| {
+            c == ':' || c == ',' || c == '-' || c == '.' || c == '?' || c == '!' || c == ';'
+                || c == '"' || c == '\'' || c == '`' || c == '“' || c == '”' || c == '(' || c == ')'
+                || c == '[' || c == ']' || c == '{' || c == '}'
+        }).trim().to_string();
+
+        if text != before {
+            changed = true;
         }
     }
 
@@ -86,8 +130,8 @@ pub fn normalize_query(input: &str) -> String {
     // 6. Strip quotes or brackets around inner word
     text = text.trim_matches(|c: char| c == '"' || c == '\'' || c == '`' || c == '“' || c == '”' || c == '(' || c == ')' || c == '[' || c == ']').trim().to_string();
 
-    // 7. Strip trailing polite/filler suffixes
-    for suffix in &[" please", " por favor", " pra mim", " para mim"] {
+    // 7. Strip trailing polite/filler suffixes one more time
+    for suffix in &[" please", " por favor", " pra mim", " para mim", " yeah", " yea", " ok", " okay", " né", " ne"] {
         if text.ends_with(suffix) {
             text = text[..text.len() - suffix.len()].trim().to_string();
         }
@@ -133,5 +177,10 @@ mod tests {
         assert_eq!(normalize_query("o que é um debuff?"), "debuff");
         assert_eq!(normalize_query("the flank please"), "flank");
         assert_eq!(normalize_query("a palavra aggro por favor"), "aggro");
+        assert_eq!(normalize_query("Test yeah"), "test");
+        assert_eq!(normalize_query("Yeah test"), "test");
+        assert_eq!(normalize_query("flank ok?"), "flank");
+        assert_eq!(normalize_query("o que é environment mano"), "environment");
+        assert_eq!(normalize_query("o que é test né?"), "test");
     }
 }

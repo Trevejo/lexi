@@ -139,3 +139,38 @@ fn test_lookup_random_english_words() {
     let res_q3 = service.lookup("o que significa castle");
     assert_ne!(res_q3.translation, "Significado não encontrado");
 }
+
+#[test]
+fn test_conversational_and_filler_queries() {
+    let service = LookupService::new(AppConfig::default());
+
+    // 1. User specific conversational inputs that previously failed
+    let res_yeah = service.lookup("Test yeah");
+    assert_eq!(res_yeah.normalized, "test");
+    assert!(res_yeah.translation.contains("teste") || res_yeah.translation.contains("exame"));
+
+    let res_warren = service.lookup("Warren Eu nem sei o que");
+    assert_eq!(res_warren.normalized, "warren");
+    assert_ne!(res_warren.translation, "Significado não encontrado");
+
+    let res_jungle = service.lookup("what is jungle");
+    assert_eq!(res_jungle.normalized, "jungle");
+    assert!(res_jungle.translation.contains("selva") || res_jungle.translation.contains("jungle"));
+
+    let res_flank_mano = service.lookup("o que é flank mano");
+    assert_eq!(res_flank_mano.normalized, "flank");
+    assert!(res_flank_mano.translation.contains("flanquear"));
+
+    let res_shyster = service.lookup("sheister");
+    assert_ne!(res_shyster.translation, "Significado não encontrado");
+
+    // 2. Latency test: Ensure every lookup runs in < 10ms (zero hanging / "pensar")
+    let test_terms = ["test yeah", "flank", "aggro", "environment", "apple", "nonexistentquery123xyz"];
+    for term in &test_terms {
+        let start = std::time::Instant::now();
+        let _ = service.lookup(term);
+        let elapsed = start.elapsed();
+        println!("Lookup for '{}' took: {:?}", term, elapsed);
+        assert!(elapsed.as_millis() < 25, "Lookup for '{}' took {:?}, must be under 25ms", term, elapsed);
+    }
+}

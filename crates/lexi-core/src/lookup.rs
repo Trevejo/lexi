@@ -136,6 +136,39 @@ impl LookupService {
                         self.store_cache(&res);
                         return res;
                     }
+
+                    // 2b. Smart token fallback for multi-word conversational queries:
+                    // When speech recognition captures extra filler words or conversational clauses,
+                    // filter out stop words and search for substantive keywords and compound terms.
+                    if normalized.contains(' ') {
+                        let words: Vec<&str> = normalized.split_whitespace().collect();
+                        let substantive: Vec<&str> = words
+                            .iter()
+                            .copied()
+                            .filter(|w| !is_stop_word(w) && w.len() >= 2)
+                            .collect();
+
+                        // Check 2-word pairs first (e.g. compound terms like "choke point")
+                        for pair in substantive.windows(2) {
+                            let compound = format!("{} {}", pair[0], pair[1]);
+                            if let Some(mut res) = dict.lookup(&compound) {
+                                res.query = raw_query.to_string();
+                                log::info!("Lookup for '{}' resolved via multi-word compound '{}'", raw_query, compound);
+                                self.store_cache(&res);
+                                return res;
+                            }
+                        }
+
+                        // Check individual substantive words (e.g. "warren", "test", "target")
+                        for word in &substantive {
+                            if let Some(mut res) = dict.lookup(word) {
+                                res.query = raw_query.to_string();
+                                log::info!("Lookup for '{}' resolved via token fallback '{}'", raw_query, word);
+                                self.store_cache(&res);
+                                return res;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -178,6 +211,27 @@ impl LookupService {
     }
 }
 
+fn is_stop_word(w: &str) -> bool {
+    matches!(
+        w.to_lowercase().as_str(),
+        // English
+        "a" | "an" | "the" | "in" | "on" | "at" | "to" | "for" | "with" | "from" | "of" | "by"
+        | "about" | "as" | "into" | "like" | "through" | "after" | "over" | "between" | "out"
+        | "is" | "are" | "was" | "were" | "be" | "been" | "being" | "have" | "has" | "had"
+        | "do" | "does" | "did" | "can" | "could" | "will" | "would" | "shall" | "should"
+        | "it" | "its" | "this" | "that" | "these" | "those" | "what" | "which" | "who"
+        | "how" | "why" | "when" | "where" | "all" | "any" | "both" | "each" | "few" | "more"
+        | "and" | "or" | "but" | "not" | "yeah" | "yes" | "ok" | "okay" | "just" | "so"
+        // Portuguese
+        | "o" | "os" | "um" | "uma" | "uns" | "umas" | "de" | "da" | "dos" | "das"
+        | "em" | "no" | "na" | "nos" | "nas" | "por" | "pra" | "pro" | "para" | "pelo" | "pela"
+        | "com" | "sem" | "sob" | "sobre" | "que" | "oq" | "e" | "é" | "eh" | "se" | "me" | "te"
+        | "eu" | "tu" | "ele" | "ela" | "nós" | "vós" | "eles" | "elas" | "meu" | "minha" | "seu" | "sua"
+        | "nem" | "sei" | "sabe" | "tipo" | "cara" | "mano" | "né" | "ne" | "então" | "entao"
+        | "aí" | "ai" | "ou" | "mas" | "já" | "ja" | "não" | "nao" | "como" | "quando" | "onde"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +246,19 @@ mod tests {
         let res2 = service.lookup("environment");
         assert_eq!(res2.normalized, "environment");
         assert!(res2.translation.contains("ambiente"));
+    }
+
+    #[test]
+    fn test_multi_word_token_fallback() {
+        let config = AppConfig::default();
+        let service = LookupService::new(config);
+        let res_yeah = service.lookup("Test yeah");
+        assert_eq!(res_yeah.normalized, "test");
+        assert!(res_yeah.translation.contains("teste") || res_yeah.translation.contains("exame"));
+
+        let res_warren = service.lookup("Warren Eu nem sei o que");
+        assert_eq!(res_warren.normalized, "warren");
+        assert_ne!(res_warren.translation, "Significado não encontrado");
     }
 }
 
