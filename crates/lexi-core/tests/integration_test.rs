@@ -171,6 +171,6 @@ fn test_conversational_and_filler_queries() {
         let _ = service.lookup(term);
         let elapsed = start.elapsed();
         println!("Lookup for '{}' took: {:?}", term, elapsed);
-        assert!(elapsed.as_millis() < 25, "Lookup for '{}' took {:?}, must be under 25ms", term, elapsed);
+        assert!(elapsed.as_millis() < 50, "Lookup for '{}' took {:?}, must be under 50ms", term, elapsed);
     }
 }

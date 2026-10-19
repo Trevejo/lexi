@@ -15,3 +15,8 @@ log = "0.4"
 thiserror = "1.0"
 regex = "1.10"
 flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+hound = "3.5"
+
+[target.'cfg(windows)'.dependencies]
+cpal = "0.15"
+

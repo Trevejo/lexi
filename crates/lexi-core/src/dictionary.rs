@@ -158,7 +158,7 @@ impl Dictionary {
     }
 
     fn query_single(&self, word: &str) -> Option<LookupResult> {
-        let mut stmt = match self.conn.prepare(
+        let mut stmt = match self.conn.prepare_cached(
             "SELECT term, pos, translation, definition, example FROM entries WHERE term = ?1 LIMIT 1"
         ) {
             Ok(s) => s,
@@ -238,15 +238,15 @@ impl Dictionary {
             capitalized.push_str(chars.as_str());
         }
 
-        // Fast indexed exact match only (<2ms).
-        // Uses idx_entries_translation without any table scanning.
-        if let Ok(mut stmt) = self.conn.prepare(
+        // Fast indexed exact match (<2ms).
+        // Uses idx_entries_translation with shortest term first (e.g. 'sword' before 'rapier' for 'espada').
+        if let Ok(mut stmt) = self.conn.prepare_cached(
             "SELECT term, pos, translation, definition, example FROM entries 
-             WHERE translation = ?1 OR translation = ?2 
+             WHERE translation = ?1 COLLATE NOCASE 
              ORDER BY length(term) ASC 
              LIMIT 1"
         ) {
-            if let Ok(mut rows) = stmt.query(params![word, capitalized]) {
+            if let Ok(mut rows) = stmt.query(params![word]) {
                 if let Ok(Some(row)) = rows.next() {
                     if let (Ok(term), Ok(translation), Ok(definition)) = (
                         row.get::<_, String>(0),

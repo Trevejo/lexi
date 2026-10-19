@@ -15,6 +15,10 @@ pub struct AppConfig {
     pub overlay: OverlayConfig,
     #[serde(default)]
     pub audio: AudioConfig,
+    #[serde(default)]
+    pub stt: SttConfig,
+    #[serde(default)]
+    pub onboarding: OnboardingConfig,
 }
 
 impl Default for AppConfig {
@@ -26,6 +30,8 @@ impl Default for AppConfig {
             dismiss: DismissConfig::default(),
             overlay: OverlayConfig::default(),
             audio: AudioConfig::default(),
+            stt: SttConfig::default(),
+            onboarding: OnboardingConfig::default(),
         }
     }
 }
@@ -103,17 +109,27 @@ pub struct LlmConfig {
     pub api_key: String,
     pub model: String,
     pub timeout_seconds: u64,
+    #[serde(default = "default_true")]
+    pub voice_clarification: bool,
+    #[serde(default = "default_true")]
+    pub gamer_insights: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            provider: "custom".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
+            provider: "gemini".to_string(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta/openai".to_string(),
             api_key: String::new(),
-            model: "gpt-4o-mini".to_string(),
+            model: "gemini-1.5-flash".to_string(),
             timeout_seconds: 5,
+            voice_clarification: true,
+            gamer_insights: true,
         }
     }
 }
@@ -174,6 +190,12 @@ pub struct OverlayConfig {
     pub font_size: i32,
     pub opacity: f32,
     pub fade_duration_ms: u32,
+    #[serde(default = "default_scale")]
+    pub scale: f32,
+}
+
+fn default_scale() -> f32 {
+    1.5
 }
 
 impl Default for OverlayConfig {
@@ -187,6 +209,7 @@ impl Default for OverlayConfig {
             font_size: 15,
             opacity: 0.94,
             fade_duration_ms: 120,
+            scale: 1.5,
         }
     }
 }
@@ -208,6 +231,46 @@ impl Default for AudioConfig {
             voice: "pt-BR".to_string(),
             volume: 85,
             rate: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttConfig {
+    pub enabled: bool,
+    pub selected_model: String,
+    pub activation_mode: String,
+    pub hotkey: String,
+    pub input_device: Option<String>,
+    pub language: String,
+    pub models_dir: Option<PathBuf>,
+}
+
+impl Default for SttConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            selected_model: "whisper-base".to_string(),
+            activation_mode: "push_to_talk".to_string(),
+            hotkey: "F9".to_string(),
+            input_device: None,
+            language: "auto".to_string(),
+            models_dir: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnboardingConfig {
+    pub completed: bool,
+    pub first_launch_time: Option<String>,
+}
+
+impl Default for OnboardingConfig {
+    fn default() -> Self {
+        Self {
+            completed: false,
+            first_launch_time: None,
         }
     }
 }
@@ -265,5 +328,17 @@ mod tests {
         "#;
         let cfg2: OverlayConfig = toml::from_str(toml_str2).expect("parse toml");
         assert_eq!(cfg2.position, OverlayPosition::MiddleRight);
+    }
+
+    #[test]
+    fn test_app_config_roundtrip() {
+        let default_cfg = AppConfig::default();
+        let toml_str = toml::to_string_pretty(&default_cfg).expect("serialize config");
+        let parsed_cfg: AppConfig = toml::from_str(&toml_str).expect("deserialize config");
+        assert_eq!(parsed_cfg.stt.selected_model, "whisper-base");
+        assert_eq!(parsed_cfg.stt.activation_mode, "push_to_talk");
+        assert_eq!(parsed_cfg.stt.hotkey, "F9");
+        assert!(!parsed_cfg.onboarding.completed);
+        assert_eq!(parsed_cfg.overlay.scale, 1.5);
     }
 }
