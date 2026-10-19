@@ -202,12 +202,14 @@ impl OverlayManager {
         if dpi == 0 {
             dpi = 96;
         }
-        (dpi as f32 / 96.0).max(1.0)
+        let system_scale = (dpi as f32 / 96.0).max(1.0);
+        let user_scale = self.config.read().map(|c| c.overlay.scale).unwrap_or(1.5).max(0.8);
+        system_scale * user_scale
     }
 
     #[cfg(not(windows))]
     fn get_dpi_scale(&self) -> f32 {
-        1.0
+        self.config.read().map(|c| c.overlay.scale).unwrap_or(1.5).max(0.8)
     }
 
     #[allow(unused_variables)]

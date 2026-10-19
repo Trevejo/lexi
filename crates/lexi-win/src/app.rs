@@ -48,12 +48,17 @@ struct AppState {
     overlay: OverlayManager,
     tts: TtsManager,
     lookup_service: Arc<LookupService>,
+    audio_service: Arc<crate::audio_service::AudioService>,
     pending_query: Mutex<Option<String>>,
     pending_result: Mutex<Option<LookupResult>>,
     hwnd: std::sync::atomic::AtomicIsize,
 }
 
 impl AppState {
+    pub fn get_config(&self) -> AppConfig {
+        self.config.read().map(|c| c.clone()).unwrap_or_default()
+    }
+
     #[allow(dead_code)]
     pub fn reload_config(&self, new_config: AppConfig) {
         log::info!("Live reloading configuration in AppState...");
@@ -108,6 +113,22 @@ pub fn get_current_config() -> AppConfig {
     AppConfig::default()
 }
 
+pub fn post_demo_result(res: LookupResult) {
+    unsafe {
+        if let Some(ref state) = GLOBAL_STATE {
+            let hwnd_val = state.hwnd.load(std::sync::atomic::Ordering::SeqCst);
+            {
+                let mut lock = state.pending_result.lock().unwrap();
+                *lock = Some(res);
+            }
+            if hwnd_val != 0 {
+                #[cfg(windows)]
+                let _ = PostMessageW(HWND(hwnd_val as *mut _), WM_APP_RESULT_READY, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+}
+
 static mut GLOBAL_STATE: Option<Arc<AppState>> = None;
 
 pub struct Application {
@@ -123,14 +144,14 @@ impl Application {
         let overlay = OverlayManager::new(self.config.clone())?;
         let tts = TtsManager::new(self.config.audio.clone());
         let lookup_service = Arc::new(LookupService::new(self.config.clone()));
-
-        KeyboardHookManager::init(&self.config);
+        let audio_service = Arc::new(crate::audio_service::AudioService::new());
 
         let app_state = Arc::new(AppState {
             config: std::sync::RwLock::new(self.config.clone()),
             overlay,
             tts,
             lookup_service,
+            audio_service,
             pending_query: Mutex::new(None),
             pending_result: Mutex::new(None),
             hwnd: std::sync::atomic::AtomicIsize::new(0),
@@ -168,9 +189,13 @@ impl Application {
             )?;
 
             app_state.hwnd.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
+            KeyboardHookManager::init(&self.config, hwnd.0 as usize);
 
             let _tray = TrayIcon::new(hwnd.0 as isize)?;
             log::info!("Lexi system tray icon registered successfully");
+
+            // Open friendly onboarding window if first launch or onboarding not completed
+            crate::onboarding::open_onboarding_window_if_needed(&self.config);
 
             // Start the Handy Bridge HTTP server
             let (query_tx, query_rx): (Sender<String>, Receiver<String>) = channel();
@@ -230,6 +255,30 @@ unsafe extern "system" fn daemon_wnd_proc(
         };
 
         match msg {
+            crate::keyboard_hook::WM_APP_START_RECORDING => {
+                state.overlay.show_toast("🎙️ Ouvindo sua voz...");
+                KeyboardHookManager::set_overlay_visible(true);
+                let cfg = state.get_config();
+                let _ = state.audio_service.start_capture(&cfg);
+                LRESULT(0)
+            }
+            crate::keyboard_hook::WM_APP_STOP_RECORDING => {
+                state.overlay.show_toast("⚡ Traduzindo...");
+                KeyboardHookManager::set_overlay_visible(true);
+                let hwnd_copy = hwnd.0 as usize;
+                let state_worker = Arc::clone(&state);
+                let cfg = state.get_config();
+                state.audio_service.stop_and_process(&cfg, Arc::clone(&state.lookup_service), move |res| {
+                    {
+                        let mut lock = state_worker.pending_result.lock().unwrap();
+                        *lock = Some(res);
+                    }
+                    unsafe {
+                        let _ = PostMessageW(HWND(hwnd_copy as *mut _), WM_APP_RESULT_READY, WPARAM(0), LPARAM(0));
+                    }
+                });
+                LRESULT(0)
+            }
             WM_APP_TRIGGER_LOOKUP => {
                 let query = {
                     state.pending_query.lock().unwrap().clone()

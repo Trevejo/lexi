@@ -3,7 +3,6 @@ use serde::Deserialize;
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
 
 #[derive(Deserialize)]
 struct KaikkiEntry {

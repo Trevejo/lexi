@@ -788,6 +788,9 @@ dependencies = [
  "env_logger",
  "lexi-core",
  "log",
+ "serde",
+ "serde_json",
+ "ureq",
  "windows 0.58.0",
 ]
 

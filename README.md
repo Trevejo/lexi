@@ -1,28 +1,35 @@
 # Lexi — Tradutor Gamer e Dicionário Nativo para Windows
 
-O **Lexi** é um aplicativo nativo e ultra-leve para Windows projetado para rodar em segundo plano enquanto você joga. Ele resolve o problema de pesquisar termos e gírias em inglês durante cutscenes e diálogos de jogos sem quebrar o ritmo da gameplay.
+O **Lexi** é um aplicativo nativo, ultra-leve e **100% autossuficiente** para Windows projetado para rodar em segundo plano enquanto você joga. Ele resolve o problema de pesquisar termos, expressões e gírias em inglês durante cutscenes e diálogos de jogos sem quebrar o ritmo da gameplay.
 
-Pressionando uma combinação de teclas e falando a palavra desejada:
-1. O **Handy** (reconhecimento de voz local offline via Whisper/Parakeet) transcreve sua voz.
-2. O **Lexi** intercepta a palavra instantaneamente, consulta o significado no **dicionário offline** (e opcionalmente na **IA**) e projeta um card visual semitransparente na frente do jogo.
-3. O card **não rouba o foco da janela do jogo**, permitindo que você continue jogando normalmente.
-4. Você pode fazer a janelinha sumir **assim que tirar o dedo da tecla**, por tempo limite ou apertando `Esc`.
-5. Em jogos de **Tela Cheia Exclusiva**, o Lexi pode ainda falar a tradução diretamente no seu fone de ouvido (via sintetizador nativo do Windows).
+Pressionando uma combinação de teclas ou segurando o atalho de voz (Push-to-Talk):
+1. O **Lexi captura sua voz diretamente do microfone** (ou opcionalmente via Handy ou outros softwares de terceiros) e transcreve com modelos locais de ponta (Whisper Base/Tiny/Small, Nemotron 3.5, Parakeet, Canary).
+2. O **Motor de IA e Normalização** do Lexi limpa hesitações de fala e gaguejos, corrige foneticamente termos gamer e consulta o significado no **dicionário offline** ou em modelos de IA externos (**Google Gemini**, **Anthropic Claude**, **OpenAI**, **OpenCode** ou endpoints customizados).
+3. O Lexi projeta um card visual semitransparente na frente do jogo com explicações detalhadas em português, contexto e exemplos reais de uso em jogos.
+4. O card **não rouba o foco da janela do jogo**, permitindo que você continue jogando sem interrupção.
+5. Você pode fazer a janelinha sumir **assim que soltar a tecla de fala**, por tempo limite ou apertando `Esc`.
+6. Em jogos de **Tela Cheia Exclusiva**, o Lexi pode ainda falar a tradução diretamente no seu fone de ouvido (via sintetizador de voz nativo do Windows).
 
 ---
 
 ## 🎯 Destaques do Projeto
 
+- **100% Autossuficiente (Sem Depender de Apps Externos):** Possui pipeline de áudio nativo integrado (`cpal`), gravação de microfone em segundo plano e gerenciador de download de modelos Speech-to-Text de alta performance direto do Hugging Face.
+- **Onboarding Amigável no Primeiro Uso:** Assistente de boas-vindas nativo que guia o usuário na escolha e download do modelo de voz recomendado em 1 clique com barra de progresso, seleção de microfone e atalho Push-to-Talk.
+- **Multi-Provedor de Inteligência Artificial:** Suporte nativo a **Google Gemini**, **Anthropic Claude**, **OpenAI (GPT-4o-mini)**, **OpenCode** (servidor local) ou qualquer endpoint compatível com OpenAI. Inclui clarificação inteligente de fala e enriquecimento de contexto gamer.
 - **Ultra-leve e 100% Nativo:** Desenvolvido em **Rust** utilizando Win32 e GDI puro (sem Electron, sem WebView2, sem .NET). Consome **0,0% de CPU ociosa** e menos de **15 MB de memória RAM**.
-- **Interface Gráfica de Configurações Nativa:** Tela de configurações completa com seletores de posição, sliders de tamanho de fonte, opacidade, volume de voz e recarregamento em tempo real sem precisar reiniciar o aplicativo.
+- **Interface Gráfica de Configurações Nativa com 4 Abas:**
+  - 🎙️ *Voz & Modelos STT:* Seleção e download de modelos (Whisper, Nemotron, Parakeet), barra de progresso, seleção de microfone e modo de ativação.
+  - 🤖 *Inteligência Artificial:* Escolha de provedor (Gemini, Claude, OpenAI, OpenCode, Custom), chave de API, modelo, endpoint e botão para **Testar Conexão** com medição de latência em tempo real.
+  - 🖥️ *Overlay no Jogo:* Posições (incluindo `middle_left` e `middle_right`), escala DPI para 4K (100% a 200%), sliders de fonte, opacidade, timeout e botão para **Testar Overlay Agora**.
+  - 🔊 *Leitura (TTS):* Leitura em voz alta via Windows SAPI.
 - **Suporte Automático a Monitores 4K & DPI Scaling:** Adaptação dinâmica de resolução e tipografia para zoom de 100%, 125%, 150%, 175% e 200%, garantindo leitura nítida e proporções perfeitas em qualquer monitor.
-- **Integração Inteligente com o Handy:** Utiliza a porta de Post-Processing local do Handy (`127.0.0.1:47823`). O Lexi instrui o Handy a **não colar nada** no jogo (sem risco de comandos indesejados no jogo).
-- **Consulta Híbrida (Offline + IA):**
-  - **Dicionário Offline Completo:** Base local com **mais de 300.000 palavras em inglês** e **65+ termos gamer** essenciais com explicações contextuais detalhadas e exemplos reais de uso em jogos (MOBA, FPS, Battle Royale, RPG). Resposta instantânea em **< 1ms**.
-  - **IA Opcional (LLM):** Compatível com OpenAI (`gpt-4o-mini`), Google Gemini (`gemini-1.5-flash`), Groq ou Ollama local para gírias complexas, expressões idiomáticas (*phrasal verbs*) e termos específicos de universos de fantasia/sci-fi.
-- **Posicionamento Flexível:** Suporte a 7 posições de overlay (`top_center`, `middle_left`, `middle_right`, `top_left`, `top_right`, `center`, `bottom_center`).
+- **Consulta Híbrida de Altíssima Velocidade:**
+  - **Dicionário Offline Completo:** Base local com **mais de 300.000 palavras em inglês** e **termos gamer** essenciais com explicações contextuais detalhadas e exemplos reais de uso em jogos (MOBA, FPS, Battle Royale, RPG). Resposta instantânea em **< 1ms**.
+  - **Cache Inteligente em SQLite:** Evita reprocessamento de termos consultados anteriormente.
+- **Posicionamento Flexível:** 7 posições de overlay (`top_center`, `middle_left`, `middle_right`, `top_left`, `top_right`, `center`, `bottom_center`).
 - **Fechamento Configurável:**
-  - `release_key`: some assim que você solta a tecla do teclado.
+  - `release_key`: some assim que você solta a tecla de fala.
   - `timeout`: some após N segundos (ex: 8s).
   - `any_key`: some ao pressionar qualquer tecla (sem bloquear a ação no jogo).
   - `hotkey`: fecha ao apertar `Esc`.
@@ -35,8 +42,6 @@ Pressionando uma combinação de teclas e falando a palavra desejada:
 ### Pré-requisitos
 1. **Windows 10 ou Windows 11**.
 2. **Rust & Cargo**: Baixe e instale pelo instalador oficial [rustup.rs](https://rustup.rs/).
-3. **C++ Build Tools**: Instalador do Visual Studio com a opção *"Desenvolvimento para Desktop com C++"* marcada.
-4. **Handy** instalado: Baixe a versão mais recente em [handy.computer](https://handy.computer) ou via `winget install cjpais.Handy`.
 
 ### Compilação em 1 Clique
 No diretório do projeto no Windows, basta dar dois cliques em:
@@ -54,7 +59,7 @@ Dê dois cliques em:
 ```cmd
 run.bat
 ```
-O Lexi iniciará silenciosamente na bandeja do sistema (perto do relógio do Windows).
+O Lexi iniciará silenciosamente na bandeja do sistema (perto do relógio do Windows) e abrirá o assistente de onboarding no primeiro uso.
 
 ---
 

@@ -1,7 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+pub mod audio_service;
 mod keyboard_hook;
+pub mod onboarding;
 mod overlay;
 pub mod settings;
 mod tray;
