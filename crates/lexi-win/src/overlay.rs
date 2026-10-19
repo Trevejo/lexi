@@ -200,6 +200,9 @@ impl OverlayManager {
             dpi = unsafe { GetDpiForWindow(fg) };
         }
         if dpi == 0 {
+            dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() };
+        }
+        if dpi == 0 {
             dpi = 96;
         }
         let system_scale = (dpi as f32 / 96.0).max(1.0);
@@ -223,25 +226,25 @@ impl OverlayManager {
             let dpi_scale = self.get_dpi_scale();
 
             let width = (config.overlay.width as f32 * dpi_scale).round() as i32;
-            let pad_x = (20.0 * dpi_scale).round() as i32;
-            let pad_top = (18.0 * dpi_scale).round() as i32;
-            let pad_bottom = (16.0 * dpi_scale).round() as i32;
+            let pad_x = (22.0 * dpi_scale).round() as i32;
+            let pad_top = (20.0 * dpi_scale).round() as i32;
+            let pad_bottom = (18.0 * dpi_scale).round() as i32;
             let content_w = width - pad_x * 2;
-            let gap = (8.0 * dpi_scale).round() as i32;
+            let gap = (10.0 * dpi_scale).round() as i32;
 
             let screen_dc = GetDC(HWND(null_mut()));
             let mem_dc = CreateCompatibleDC(screen_dc);
 
-            // Setup fonts
+            // Setup fonts with negative character heights for crisp 4K typography
             let font_name = to_wide_null_terminated(&config.overlay.font_family);
             let base_font_size = config.overlay.font_size as f32;
 
-            let query_font_size = ((base_font_size * 1.35 * dpi_scale).round() as i32).max(18);
-            let trans_font_size = ((base_font_size * 1.25 * dpi_scale).round() as i32).max(17);
-            let body_font_size = ((base_font_size * dpi_scale).round() as i32).max(14);
-            let badge_font_size = ((base_font_size * 0.75 * dpi_scale).round() as i32).max(11);
-            let example_font_size = ((base_font_size * 0.88 * dpi_scale).round() as i32).max(13);
-            let footer_font_size = ((base_font_size * 0.78 * dpi_scale).round() as i32).max(11);
+            let query_font_size = -((base_font_size * 1.55 * dpi_scale).round() as i32);
+            let trans_font_size = -((base_font_size * 1.35 * dpi_scale).round() as i32);
+            let body_font_size = -((base_font_size * 1.15 * dpi_scale).round() as i32);
+            let badge_font_size = -((base_font_size * 0.90 * dpi_scale).round() as i32);
+            let example_font_size = -((base_font_size * 1.05 * dpi_scale).round() as i32);
+            let footer_font_size = -((base_font_size * 0.85 * dpi_scale).round() as i32);
 
             let query_font = CreateFontW(
                 query_font_size, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0,
@@ -422,20 +425,20 @@ impl OverlayManager {
             let corner_radius = (12.0 * dpi_scale).round() as i32;
             let bg_alpha = ((config.overlay.opacity * 255.0).clamp(0.0, 255.0)) as u8;
 
-            // Main Card surface: Slate-900 with Indigo-500 border
+            // Main Card surface: Deep Obsidian Velvet Purple with Vibrant Amethyst border
             draw_rounded_box(
                 slice, width, height,
                 0, 0, width, height, corner_radius,
-                (15, 23, 42, bg_alpha),       // Slate-900
-                (99, 102, 241, bg_alpha.max(220)), // Indigo-500
+                (20, 14, 32, bg_alpha),              // Deep Obsidian Purple
+                (147, 51, 234, bg_alpha.max(225)),  // Purple-600 Vibrant Amethyst
             );
 
-            // Top highlight accent line (Sky-400 / Emerald-400)
+            // Top highlight accent line (Electric Lilac Glow)
             let top_border_h = (1.5 * dpi_scale).round().max(1.0) as i32;
-            let highlight_r = 56u8;
-            let highlight_g = 189u8;
-            let highlight_b = 248u8;
-            let highlight_a = bg_alpha.max(220);
+            let highlight_r = 216u8;
+            let highlight_g = 180u8;
+            let highlight_b = 254u8; // Purple-300 / Lilac
+            let highlight_a = bg_alpha.max(225);
             let highlight_pixel = ((highlight_a as u32) << 24)
                 | (((highlight_r as u32 * highlight_a as u32 + 127) / 255) << 16)
                 | (((highlight_g as u32 * highlight_a as u32 + 127) / 255) << 8)
@@ -453,7 +456,7 @@ impl OverlayManager {
                 }
             }
 
-            // Draw Part-of-Speech Badge Pill
+            // Draw Part-of-Speech Badge Pill (Royal Deep Violet + Electric Violet border)
             let pill_x0 = pad_x + query_w + (12.0 * dpi_scale) as i32;
             let pill_y0 = pad_top + (header_row_h - badge_pill_h) / 2;
             if badge_wide.is_some() {
@@ -461,12 +464,12 @@ impl OverlayManager {
                     slice, width, height,
                     pill_x0, pill_y0, pill_x0 + badge_pill_w, pill_y0 + badge_pill_h,
                     badge_pill_h / 2,
-                    (30, 27, 75, 240),   // Indigo-950
-                    (99, 102, 241, 240), // Indigo-500
+                    (59, 7, 100, 240),    // Purple-950 Royal Velvet
+                    (168, 85, 247, 240),  // Purple-500 Electric Violet
                 );
             }
 
-            // Draw subtle divider line above footer
+            // Draw subtle divider line above footer (Muted Deep Violet)
             let foot_pill_w = foot_w + (20.0 * dpi_scale).round() as i32;
             let foot_pill_y0 = height - pad_bottom - foot_pill_h;
             let foot_pill_x0 = pad_x;
@@ -474,9 +477,9 @@ impl OverlayManager {
 
             let sep_alpha = (bg_alpha as u32 * 140) / 255;
             let sep_pixel = (sep_alpha << 24)
-                | (((30 * sep_alpha + 127) / 255) << 16)
-                | (((41 * sep_alpha + 127) / 255) << 8)
-                | ((59 * sep_alpha + 127) / 255);
+                | (((88 * sep_alpha + 127) / 255) << 16)
+                | (((28 * sep_alpha + 127) / 255) << 8)
+                | ((135 * sep_alpha + 127) / 255);
 
             if sep_y > 0 && sep_y < height {
                 let x_start = pad_x.clamp(0, width);
@@ -490,13 +493,13 @@ impl OverlayManager {
                 }
             }
 
-            // Draw Footer Dismissal Pill
+            // Draw Footer Dismissal Pill (Deep Violet-900 surface)
             draw_rounded_box(
                 slice, width, height,
                 foot_pill_x0, foot_pill_y0, foot_pill_x0 + foot_pill_w, foot_pill_y0 + foot_pill_h,
                 (6.0 * dpi_scale).round() as i32,
-                (30, 41, 59, 230), // Slate-800
-                (51, 65, 85, 230), // Slate-700
+                (46, 16, 77, 230),   // Deep Violet-900
+                (126, 34, 206, 230), // Purple-700
             );
 
             // Snapshot background buffer before GDI drawing to resolve alpha premultiplication
@@ -507,9 +510,9 @@ impl OverlayManager {
 
             let mut cur_y = pad_top;
 
-            // 1. Header Query Title
+            // 1. Header Query Title (Crisp Lilac-White)
             SelectObject(mem_dc, query_font);
-            SetTextColor(mem_dc, rgb(248, 250, 252)); // Slate-50 White
+            SetTextColor(mem_dc, rgb(250, 245, 255)); // Purple-50
             let mut draw_q_rc = RECT {
                 left: pad_x,
                 top: cur_y,
@@ -518,11 +521,11 @@ impl OverlayManager {
             };
             DrawTextW(mem_dc, &mut query_wide, &mut draw_q_rc, DT_SINGLELINE | DT_NOPREFIX);
 
-            // 1b. Header Part of Speech Badge
+            // 1b. Header Part of Speech Badge (Bright Lilac Text)
             if let Some(mut b_wide) = badge_wide {
                 if !b_wide.is_empty() {
                     SelectObject(mem_dc, badge_font);
-                    SetTextColor(mem_dc, rgb(199, 210, 254)); // Indigo-200
+                    SetTextColor(mem_dc, rgb(233, 213, 255)); // Purple-200
                     let mut draw_b_rc = RECT {
                         left: pill_x0,
                         top: pill_y0,
@@ -535,9 +538,9 @@ impl OverlayManager {
 
             cur_y += header_row_h + gap;
 
-            // 2. Translation (High contrast emerald/cyan #38bdf8 / #34d399)
+            // 2. Translation (Glowing Neon Lavender / Violet #c084fc)
             SelectObject(mem_dc, trans_font);
-            SetTextColor(mem_dc, rgb(56, 189, 248)); // Sky-400
+            SetTextColor(mem_dc, rgb(192, 132, 252)); // Purple-400 Neon Violet
             let mut draw_t_rc = RECT {
                 left: pad_x,
                 top: cur_y,
@@ -548,9 +551,9 @@ impl OverlayManager {
 
             cur_y += trans_h + gap;
 
-            // 3. Definition / Context explanation (Slate-100/200 wrapped with DT_WORDBREAK)
+            // 3. Definition / Context explanation (Soft High-Contrast Lavender-White)
             SelectObject(mem_dc, body_font);
-            SetTextColor(mem_dc, rgb(226, 232, 240)); // Slate-200
+            SetTextColor(mem_dc, rgb(243, 232, 255)); // Purple-100 Lavender
             let max_def_bottom = sep_y - (6.0 * dpi_scale) as i32;
             if cur_y < max_def_bottom {
                 let mut draw_d_rc = RECT {
@@ -563,11 +566,11 @@ impl OverlayManager {
                 cur_y += actual_def_h.max(0) + gap;
             }
 
-            // 4. Example (if present, italicized with "Ex:" prefix in slate-400)
+            // 4. Example (if present, italicized with "Ex:" prefix in soft lilac)
             if let Some(mut e_wide) = ex_wide {
                 if !e_wide.is_empty() && cur_y < max_def_bottom {
                     SelectObject(mem_dc, example_font);
-                    SetTextColor(mem_dc, rgb(148, 163, 184)); // Slate-400
+                    SetTextColor(mem_dc, rgb(216, 180, 254)); // Purple-300
                     let mut draw_e_rc = RECT {
                         left: pad_x,
                         top: cur_y,
@@ -578,9 +581,9 @@ impl OverlayManager {
                 }
             }
 
-            // 5. Dismissal Hint in Footer Pill
+            // 5. Dismissal Hint in Footer Pill (Muted Lilac)
             SelectObject(mem_dc, footer_font);
-            SetTextColor(mem_dc, rgb(148, 163, 184)); // Slate-400
+            SetTextColor(mem_dc, rgb(216, 180, 254)); // Purple-300
             let mut draw_f_rc = RECT {
                 left: foot_pill_x0,
                 top: foot_pill_y0,
@@ -706,8 +709,8 @@ impl OverlayManager {
             draw_rounded_box(
                 slice, width, height,
                 0, 0, width, height, corner_radius,
-                (15, 23, 42, 245),       // Slate-900
-                (52, 211, 153, 255),     // Emerald-400 accent border
+                (20, 14, 32, 248),       // Deep Obsidian Purple
+                (168, 85, 247, 255),     // Purple-500 Electric Violet border
             );
 
             let mut bg_snapshot = vec![0u32; pixel_count];
@@ -717,31 +720,31 @@ impl OverlayManager {
             let font_name = to_wide_null_terminated(&config.overlay.font_family);
 
             let badge_font = CreateFontW(
-                ((12.0 * dpi_scale).round() as i32).max(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0,
+                -((13.0 * dpi_scale).round() as i32), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0,
                 PCWSTR(font_name.as_ptr()),
             );
             let msg_font = CreateFontW(
-                ((14.0 * dpi_scale).round() as i32).max(12), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0,
+                -((15.0 * dpi_scale).round() as i32), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0,
                 PCWSTR(font_name.as_ptr()),
             );
 
             let old_font = SelectObject(mem_dc, badge_font);
 
-            // Icon / App badge
-            SetTextColor(mem_dc, rgb(52, 211, 153)); // Emerald-400
-            let mut icon_wide = to_wide_chars("✓ LEXI");
+            // Icon / App badge (Glowing Lilac)
+            SetTextColor(mem_dc, rgb(192, 132, 252)); // Purple-400
+            let mut icon_wide = to_wide_chars("⚡ LEXI");
             let icon_pad_x = (18.0 * dpi_scale).round() as i32;
             let mut icon_rc = RECT {
                 left: icon_pad_x,
                 top: 0,
-                right: icon_pad_x + (70.0 * dpi_scale) as i32,
+                right: icon_pad_x + (75.0 * dpi_scale) as i32,
                 bottom: height,
             };
             DrawTextW(mem_dc, &mut icon_wide, &mut icon_rc, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
-            // Toast message text
+            // Toast message text (Crisp Pure Lilac-White)
             SelectObject(mem_dc, msg_font);
-            SetTextColor(mem_dc, rgb(241, 245, 249)); // Slate-100
+            SetTextColor(mem_dc, rgb(250, 245, 255)); // Purple-50
             let mut msg_wide = to_wide_chars(message);
             let msg_left = icon_rc.right + (6.0 * dpi_scale) as i32;
             let mut msg_rc = RECT {

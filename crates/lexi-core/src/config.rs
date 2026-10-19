@@ -163,7 +163,7 @@ impl Default for DismissConfig {
             mode: DismissMode::Hybrid,
             timeout_seconds: 8.0,
             dismiss_hotkey: "Escape".to_string(),
-            trigger_key_to_watch: "F13".to_string(),
+            trigger_key_to_watch: "Ctrl+Space".to_string(),
         }
     }
 }
@@ -203,8 +203,8 @@ impl Default for OverlayConfig {
         Self {
             enabled: true,
             position: OverlayPosition::TopCenter,
-            width: 440,
-            max_height: 240,
+            width: 480,
+            max_height: 260,
             font_family: "Segoe UI".to_string(),
             font_size: 15,
             opacity: 0.94,
@@ -252,7 +252,7 @@ impl Default for SttConfig {
             enabled: true,
             selected_model: "whisper-base".to_string(),
             activation_mode: "push_to_talk".to_string(),
-            hotkey: "F9".to_string(),
+            hotkey: "Ctrl+Space".to_string(),
             input_device: None,
             language: "auto".to_string(),
             models_dir: None,
@@ -337,7 +337,7 @@ mod tests {
         let parsed_cfg: AppConfig = toml::from_str(&toml_str).expect("deserialize config");
         assert_eq!(parsed_cfg.stt.selected_model, "whisper-base");
         assert_eq!(parsed_cfg.stt.activation_mode, "push_to_talk");
-        assert_eq!(parsed_cfg.stt.hotkey, "F9");
+        assert_eq!(parsed_cfg.stt.hotkey, "Ctrl+Space");
         assert!(!parsed_cfg.onboarding.completed);
         assert_eq!(parsed_cfg.overlay.scale, 1.5);
     }

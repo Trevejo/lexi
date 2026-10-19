@@ -174,3 +174,132 @@ fn test_conversational_and_filler_queries() {
         assert!(elapsed.as_millis() < 50, "Lookup for '{}' took {:?}, must be under 50ms", term, elapsed);
     }
 }
+
+#[test]
+fn test_hotkey_ctrl_space_end_to_end() {
+    use lexi_core::hotkey::parse_hotkey;
+
+    // Test primary trigger string
+    let binding = parse_hotkey("Ctrl+Space");
+    assert_eq!(binding.vk, 0x20, "VK should be VK_SPACE (0x20)");
+    assert!(binding.ctrl, "Ctrl modifier must be true");
+    assert!(!binding.alt, "Alt must be false");
+    assert!(!binding.shift, "Shift must be false");
+    assert!(!binding.win, "Win must be false");
+    assert_eq!(binding.to_display_string(), "Ctrl + Space");
+
+    // Variations
+    let variants = ["ctrl+space", "ctrl + space", "Ctrl + Espaço", "Ctrl+Space (Recomendado)", "Control + Space"];
+    for v in &variants {
+        let b = parse_hotkey(v);
+        assert_eq!(b.vk, 0x20, "Variant '{}' must resolve to VK_SPACE", v);
+        assert!(b.ctrl, "Variant '{}' must require Ctrl modifier", v);
+    }
+
+    // Modifier release verification (when user releases Ctrl, PTT must stop)
+    assert!(binding.is_modifier_released(0x11), "VK_CONTROL (0x11) release must be detected");
+    assert!(binding.is_modifier_released(0xA2), "VK_LCONTROL (0xA2) release must be detected");
+    assert!(binding.is_modifier_released(0xA3), "VK_RCONTROL (0xA3) release must be detected");
+    assert!(!binding.is_modifier_released(0x12), "VK_MENU (Alt) should not trigger Ctrl release");
+    assert!(!binding.is_modifier_released(0x10), "VK_SHIFT should not trigger Ctrl release");
+
+    // Other hotkeys that users can configure
+    let alt_space = parse_hotkey("Alt+Space");
+    assert_eq!(alt_space.vk, 0x20);
+    assert!(alt_space.alt);
+    assert!(!alt_space.ctrl);
+    assert!(alt_space.is_modifier_released(0x12)); // VK_MENU
+
+    let caps = parse_hotkey("CapsLock");
+    assert_eq!(caps.vk, 0x14); // VK_CAPITAL
+    assert!(!caps.ctrl);
+    assert!(!caps.alt);
+
+    let f9 = parse_hotkey("F9");
+    assert_eq!(f9.vk, 0x78);
+    assert!(!f9.ctrl);
+}
+
+#[test]
+fn test_dpi_scaling_calculations_4k() {
+    // 96 DPI = 100% (Standard 1080p)
+    let dpi_96 = 96.0f32;
+    let scale_100 = (dpi_96 / 96.0).max(1.0);
+    assert!((scale_100 - 1.0).abs() < f32::EPSILON);
+
+    // 144 DPI = 150% (Standard 4K monitor scaling)
+    let dpi_144 = 144.0f32;
+    let scale_150 = (dpi_144 / 96.0).max(1.0);
+    assert!((scale_150 - 1.5).abs() < f32::EPSILON);
+
+    // 192 DPI = 200% (High density 4K)
+    let dpi_192 = 192.0f32;
+    let scale_200 = (dpi_192 / 96.0).max(1.0);
+    assert!((scale_200 - 2.0).abs() < f32::EPSILON);
+
+    // Scaling helper s(v)
+    let s = |v: i32, scale: f32| -> i32 { (v as f32 * scale).round() as i32 };
+
+    // Overlay width: base 480
+    assert_eq!(s(480, scale_100), 480);
+    assert_eq!(s(480, scale_150), 720); // 480 * 1.5 = 720
+    assert_eq!(s(480, scale_200), 960); // 480 * 2.0 = 960
+
+    // Settings window: base 660x700
+    assert_eq!(s(660, scale_150), 990);
+    assert_eq!(s(700, scale_150), 1050);
+
+    // Font point size: -((base_font_size * 1.55 * dpi_scale).round() as i32)
+    let font_calc = |base: f32, scale: f32| -> i32 {
+        -((base * 1.55 * scale).round() as i32)
+    };
+    assert_eq!(font_calc(14.0, 1.0), -22); // 14 * 1.55 = 21.7 -> 22
+    assert_eq!(font_calc(14.0, 1.5), -33); // 14 * 1.55 * 1.5 = 32.55 -> 33
+    assert_eq!(font_calc(14.0, 2.0), -43); // 14 * 1.55 * 2.0 = 43.4 -> 43
+}
+
+#[test]
+fn test_settings_tab_and_config_e2e() {
+    use lexi_core::config::{AppConfig, DismissMode, OverlayPosition};
+
+    let config = AppConfig::default();
+    assert_eq!(config.stt.hotkey, "Ctrl+Space");
+    assert_eq!(config.dismiss.trigger_key_to_watch, "Ctrl+Space");
+    assert_eq!(config.overlay.width, 480);
+    assert_eq!(config.overlay.position, OverlayPosition::TopCenter);
+
+    // Verify all 7 positions supported in the settings tab
+    let positions = [
+        OverlayPosition::TopCenter,
+        OverlayPosition::Center,
+        OverlayPosition::BottomCenter,
+        OverlayPosition::TopLeft,
+        OverlayPosition::TopRight,
+        OverlayPosition::MiddleLeft,
+        OverlayPosition::MiddleRight,
+    ];
+    for pos in &positions {
+        let mut cfg = config.clone();
+        cfg.overlay.position = pos.clone();
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let reloaded: AppConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(reloaded.overlay.position, *pos);
+    }
+
+    // Verify all dismiss modes
+    let dismiss_modes = [
+        DismissMode::Hybrid,
+        DismissMode::ReleaseKey,
+        DismissMode::Timeout,
+        DismissMode::Hotkey,
+        DismissMode::AnyKey,
+    ];
+    for mode in &dismiss_modes {
+        let mut cfg = config.clone();
+        cfg.dismiss.mode = mode.clone();
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let reloaded: AppConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(reloaded.dismiss.mode, *mode);
+    }
+}
+

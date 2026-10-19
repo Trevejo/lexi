@@ -15,11 +15,11 @@ use std::thread;
 #[cfg(windows)]
 use windows::core::PCWSTR;
 #[cfg(windows)]
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
 #[cfg(windows)]
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, GetSysColorBrush, SetBkMode,
-    COLOR_BTNFACE, DEFAULT_CHARSET, HDC, TRANSPARENT,
+    CreateFontW, CreateSolidBrush, InvalidateRect, SetBkColor,
+    SetBkMode, SetTextColor, UpdateWindow, DEFAULT_CHARSET, HDC, TRANSPARENT,
 };
 #[cfg(windows)]
 use windows::Win32::UI::Controls::{
@@ -29,14 +29,26 @@ use windows::Win32::UI::Controls::{
 
 #[cfg(windows)]
 const TBM_GETPOS: u32 = 1024;
+#[cfg(windows)]
 const PBM_SETRANGE32: u32 = 1030;
+#[cfg(windows)]
 const PBM_SETPOS: u32 = 1026;
 
+#[cfg(windows)]
 const TCM_FIRST: u32 = 0x1300;
+#[cfg(windows)]
 const TCM_INSERTITEMW: u32 = TCM_FIRST + 62;
+#[cfg(windows)]
 const TCM_GETCURSEL: u32 = TCM_FIRST + 11;
-const TCN_FIRST: u32 = 0xFFFFFD00;
-const TCN_SELCHANGE: u32 = TCN_FIRST - 551;
+#[cfg(windows)]
+const TCN_FIRST: u32 = 0u32.wrapping_sub(550); // 0xFFFF_FDDA
+#[cfg(windows)]
+const TCN_SELCHANGE: u32 = TCN_FIRST.wrapping_sub(1); // 0xFFFF_FDD9 (-551 in signed 32-bit)
+
+#[cfg(windows)]
+const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
+    COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
+}
 
 #[cfg(windows)]
 use windows::Win32::UI::Controls::NMHDR;
@@ -53,7 +65,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BS_GROUPBOX, BS_PUSHBUTTON, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, CBS_DROPDOWNLIST,
     ES_AUTOHSCROLL, GWLP_USERDATA, HMENU, MSG, SM_CXSCREEN, SM_CYSCREEN,
     SW_HIDE, SW_RESTORE, SW_SHOW, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_HSCROLL, WM_NOTIFY, WM_SETFONT, WNDCLASSW,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_HSCROLL, WM_NOTIFY, WM_SETFONT, WNDCLASSW,
     WS_BORDER, WS_CAPTION, WS_CHILD, WS_CLIPSIBLINGS, WS_MINIMIZEBOX, WS_OVERLAPPED,
     WS_SYSMENU, WS_VISIBLE, WS_VSCROLL,
 };
@@ -67,15 +79,24 @@ use lexi_core::stt_models::{download_stt_model, list_audio_input_devices, ModelC
 #[allow(dead_code)]
 static SETTINGS_HWND: Mutex<Option<usize>> = Mutex::new(None);
 
+#[cfg(windows)]
 const ID_TAB_CONTROL: usize = 1000;
+#[cfg(windows)]
 const ID_BTN_SAVE: usize = 2001;
+#[cfg(windows)]
 const ID_BTN_CANCEL: usize = 2002;
+#[cfg(windows)]
 const ID_BTN_OPEN_FILE: usize = 2003;
+#[cfg(windows)]
 const ID_BTN_DOWNLOAD_STT: usize = 2004;
+#[cfg(windows)]
 const ID_BTN_TEST_AI: usize = 2005;
+#[cfg(windows)]
 const ID_BTN_DEMO_OVERLAY: usize = 2006;
+#[cfg(windows)]
 const ID_COMBO_AI_PROVIDER: usize = 2007;
 
+#[cfg(windows)]
 const POSITION_CHOICES: &[(&str, OverlayPosition)] = &[
     ("Topo Central (top_center)", OverlayPosition::TopCenter),
     ("Centro da Tela (center)", OverlayPosition::Center),
@@ -86,6 +107,7 @@ const POSITION_CHOICES: &[(&str, OverlayPosition)] = &[
     ("Meio Direita (middle_right)", OverlayPosition::MiddleRight),
 ];
 
+#[cfg(windows)]
 const DISMISS_CHOICES: &[(&str, DismissMode)] = &[
     ("Híbrido (Tempo limite + Soltar tecla)", DismissMode::Hybrid),
     ("Soltar Tecla de Trigger (Release Key)", DismissMode::ReleaseKey),
@@ -94,6 +116,7 @@ const DISMISS_CHOICES: &[(&str, DismissMode)] = &[
     ("Qualquer Tecla (Any Key)", DismissMode::AnyKey),
 ];
 
+#[cfg(windows)]
 const SCALE_CHOICES: &[(&str, f32)] = &[
     ("100% (Padrão 1080p)", 1.0),
     ("125% (Médio)", 1.25),
@@ -203,23 +226,31 @@ fn run_settings_window() {
         let _ = InitCommonControlsEx(&icce);
 
         let class_name = to_wide_str("LexiModernSettingsDialogClass");
-        let wnd_class = WNDCLASSW {
-            lpfnWndProc: Some(settings_wnd_proc),
-            lpszClassName: PCWSTR(class_name.as_ptr()),
-            hbrBackground: GetSysColorBrush(COLOR_BTNFACE),
-            ..Default::default()
+        let dpi = {
+            let d = windows::Win32::UI::HiDpi::GetDpiForSystem();
+            if d != 0 { d } else { 96 }
         };
+        let scale = (dpi as f32 / 96.0).max(1.0);
+        let s = |v: i32| -> i32 { (v as f32 * scale).round() as i32 };
 
-        let _ = RegisterClassW(&wnd_class);
-
-        let win_w = 640;
-        let win_h = 670;
+        let win_w = s(660);
+        let win_h = s(700);
         let screen_w = GetSystemMetrics(SM_CXSCREEN);
         let screen_h = GetSystemMetrics(SM_CYSCREEN);
         let pos_x = (screen_w - win_w) / 2;
         let pos_y = (screen_h - win_h) / 2;
 
         let title = to_wide_str("Configurações - Lexi (Tradutor & Interpretador Gamer)");
+        let purple_bg_brush = CreateSolidBrush(rgb(23, 16, 35));
+        let wnd_class = WNDCLASSW {
+            lpfnWndProc: Some(settings_wnd_proc),
+            lpszClassName: PCWSTR(class_name.as_ptr()),
+            hbrBackground: purple_bg_brush,
+            ..Default::default()
+        };
+
+        let _ = RegisterClassW(&wnd_class);
+
         let hwnd = match CreateWindowExW(
             Default::default(),
             PCWSTR(class_name.as_ptr()),
@@ -271,14 +302,21 @@ unsafe extern "system" fn settings_wnd_proc(
         windows::Win32::UI::WindowsAndMessaging::WM_CREATE => {
             let config = crate::app::get_current_config();
 
+            let dpi = windows::Win32::UI::HiDpi::GetDpiForSystem();
+            let scale = if dpi != 0 { (dpi as f32 / 96.0).max(1.0) } else { 1.0 };
+            let s = |v: i32| -> i32 { (v as f32 * scale).round() as i32 };
+
             let font_name = to_wide_str("Segoe UI");
+            let font_h = -((13.0 * scale).round() as i32).min(-12);
+            let font_h_bold = -((13.0 * scale).round() as i32).min(-12);
+
             let hfont = CreateFontW(
-                -13, 0, 0, 0, 400, 0, 0, 0,
+                font_h, 0, 0, 0, 400, 0, 0, 0,
                 DEFAULT_CHARSET.0 as u32, 0, 0, 0, 0,
                 PCWSTR(font_name.as_ptr()),
             );
             let hfont_bold = CreateFontW(
-                -13, 0, 0, 0, 700, 0, 0, 0,
+                font_h_bold, 0, 0, 0, 700, 0, 0, 0,
                 DEFAULT_CHARSET.0 as u32, 0, 0, 0, 0,
                 PCWSTR(font_name.as_ptr()),
             );
@@ -298,7 +336,7 @@ unsafe extern "system" fn settings_wnd_proc(
                     PCWSTR(class.as_ptr()),
                     PCWSTR(t_wide.as_ptr()),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(style),
-                    x, y, w, h,
+                    s(x), s(y), s(w), s(h),
                     hwnd,
                     HMENU(id as *mut _),
                     None,
@@ -411,20 +449,31 @@ unsafe extern "system" fn settings_wnd_proc(
 
             let l0_key = make_ctrl(&static_class, "Tecla de Gatilho:", WS_CHILD.0 | WS_VISIBLE.0, 42, 385, 150, 18, 0);
             tab0_ctrls.push(l0_key.0 as usize);
-            let h_combo_hotkey = make_ctrl(&combo_class, "", WS_CHILD.0 | WS_VISIBLE.0 | WS_VSCROLL.0 | CBS_DROPDOWNLIST as u32, 200, 382, 220, 180, 307);
+            let h_combo_hotkey = make_ctrl(&combo_class, "", WS_CHILD.0 | WS_VISIBLE.0 | WS_VSCROLL.0 | CBS_DROPDOWNLIST as u32, 200, 382, 240, 180, 307);
             tab0_ctrls.push(h_combo_hotkey.0 as usize);
-            let hotkey_choices = ["F9", "CapsLock", "F13", "Ctrl+Space", "F8", "F10", "ScrollLock"];
+            let hotkey_choices = [
+                ("Ctrl+Space (Recomendado)", "Ctrl+Space"),
+                ("F9 (Tecla de Função)", "F9"),
+                ("CapsLock (Fixa)", "CapsLock"),
+                ("F13 (Mouse / Atalho)", "F13"),
+                ("Alt+Space", "Alt+Space"),
+                ("F8", "F8"),
+                ("F10", "F10"),
+                ("ScrollLock", "ScrollLock"),
+            ];
+            let current_binding = lexi_core::parse_hotkey(&config.stt.hotkey);
             let mut selected_hk_idx = 0;
-            for (idx, hk) in hotkey_choices.iter().enumerate() {
-                let h_wide = to_wide_str(hk);
+            for (idx, (label, val)) in hotkey_choices.iter().enumerate() {
+                let h_wide = to_wide_str(label);
                 SendMessageW(h_combo_hotkey, CB_ADDSTRING, WPARAM(0), LPARAM(h_wide.as_ptr() as isize));
-                if *hk == config.stt.hotkey {
+                let parsed = lexi_core::parse_hotkey(val);
+                if parsed.vk == current_binding.vk && parsed.ctrl == current_binding.ctrl && parsed.alt == current_binding.alt {
                     selected_hk_idx = idx;
                 }
             }
             SendMessageW(h_combo_hotkey, CB_SETCURSEL, WPARAM(selected_hk_idx), LPARAM(0));
 
-            let l0_tip = make_ctrl(&static_class, "Dica: F9 e CapsLock são perfeitos para jogos competitivos (sem conflitar com WASD).", WS_CHILD.0 | WS_VISIBLE.0, 42, 425, 538, 20, 0);
+            let l0_tip = make_ctrl(&static_class, "Dica: 'Ctrl+Space' e 'F9' são perfeitos para jogos competitivos sem conflitar com WASD.", WS_CHILD.0 | WS_VISIBLE.0, 42, 425, 538, 20, 0);
             tab0_ctrls.push(l0_tip.0 as usize);
 
             // ==========================================
@@ -637,7 +686,7 @@ unsafe extern "system" fn settings_wnd_proc(
 
         WM_NOTIFY => {
             let nmhdr = *(lparam.0 as *const NMHDR);
-            if nmhdr.idFrom == ID_TAB_CONTROL && nmhdr.code == TCN_SELCHANGE {
+            if nmhdr.idFrom == ID_TAB_CONTROL && (nmhdr.code as i32 == -551 || nmhdr.code == TCN_SELCHANGE) {
                 let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
                 if ptr != 0 {
                     let state = &*(ptr as *const SettingsControls);
@@ -648,6 +697,8 @@ unsafe extern "system" fn settings_wnd_proc(
                             let _ = ShowWindow(HWND(ctrl_hwnd_val as *mut _), show_cmd);
                         }
                     }
+                    let _ = InvalidateRect(hwnd, None, true);
+                    let _ = UpdateWindow(hwnd);
                 }
             }
             LRESULT(0)
@@ -860,7 +911,7 @@ unsafe extern "system" fn settings_wnd_proc(
                         new_config.stt.activation_mode = if is_ptt { "push_to_talk".to_string() } else { "toggle".to_string() };
 
                         let hk_idx = SendMessageW(HWND(state.h_combo_hotkey as *mut _), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 as usize;
-                        let hotkey_choices = ["F9", "CapsLock", "F13", "Ctrl+Space", "F8", "F10", "ScrollLock"];
+                        let hotkey_choices = ["Ctrl+Space", "F9", "CapsLock", "F13", "Alt+Space", "F8", "F10", "ScrollLock"];
                         if let Some(&hk) = hotkey_choices.get(hk_idx) {
                             new_config.stt.hotkey = hk.to_string();
                         }
@@ -940,10 +991,38 @@ unsafe extern "system" fn settings_wnd_proc(
             LRESULT(0)
         }
 
-        WM_CTLCOLORSTATIC | WM_CTLCOLORDLG | WM_CTLCOLORBTN => {
+        WM_CTLCOLORDLG => {
+            let hbrush = CreateSolidBrush(rgb(23, 16, 35));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLORSTATIC => {
             let hdc = HDC(wparam.0 as *mut _);
             SetBkMode(hdc, TRANSPARENT);
-            LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+            SetTextColor(hdc, rgb(235, 225, 252)); // Lavender RGB(235, 225, 252)
+            let hbrush = CreateSolidBrush(rgb(23, 16, 35));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLOREDIT => {
+            let hdc = HDC(wparam.0 as *mut _);
+            SetBkColor(hdc, rgb(38, 26, 60)); // Dark Purple
+            SetTextColor(hdc, rgb(255, 255, 255)); // White
+            let hbrush = CreateSolidBrush(rgb(38, 26, 60));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLORLISTBOX => {
+            let hdc = HDC(wparam.0 as *mut _);
+            SetBkColor(hdc, rgb(38, 26, 60));
+            SetTextColor(hdc, rgb(255, 255, 255));
+            let hbrush = CreateSolidBrush(rgb(38, 26, 60));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLORBTN => {
+            let hbrush = CreateSolidBrush(rgb(23, 16, 35));
+            LRESULT(hbrush.0 as isize)
         }
 
         WM_DESTROY => {

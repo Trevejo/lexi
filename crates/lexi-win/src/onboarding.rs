@@ -15,12 +15,17 @@ use std::thread;
 #[cfg(windows)]
 use windows::core::PCWSTR;
 #[cfg(windows)]
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
 #[cfg(windows)]
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, GetSysColorBrush, SetBkMode,
-    COLOR_BTNFACE, DEFAULT_CHARSET, HDC, TRANSPARENT,
+    CreateFontW, CreateSolidBrush, SetBkColor, SetBkMode, SetTextColor,
+    DEFAULT_CHARSET, HDC, TRANSPARENT,
 };
+
+#[cfg(windows)]
+const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
+    COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
+}
 #[cfg(windows)]
 use windows::Win32::UI::Controls::{
     InitCommonControlsEx, ICC_BAR_CLASSES, ICC_PROGRESS_CLASS, ICC_STANDARD_CLASSES,
@@ -36,7 +41,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BM_GETCHECK, BM_SETCHECK, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, BS_DEFPUSHBUTTON,
     BS_GROUPBOX, BS_PUSHBUTTON, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, CBS_DROPDOWNLIST,
     GWLP_USERDATA, HMENU, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_RESTORE, SW_SHOW,
-    WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+    WM_CTLCOLORSTATIC, WM_DESTROY,
     WM_SETFONT, WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX,
     WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
 };
@@ -119,24 +125,32 @@ fn run_onboarding_window() {
         };
         let _ = InitCommonControlsEx(&icce);
 
-        let class_name = to_wide_str("LexiOnboardingDialogClass");
-        let wnd_class = WNDCLASSW {
-            lpfnWndProc: Some(onboarding_wnd_proc),
-            lpszClassName: PCWSTR(class_name.as_ptr()),
-            hbrBackground: GetSysColorBrush(COLOR_BTNFACE),
-            ..Default::default()
+        let dpi = {
+            let d = windows::Win32::UI::HiDpi::GetDpiForSystem();
+            if d != 0 { d } else { 96 }
         };
+        let scale = (dpi as f32 / 96.0).max(1.0);
+        let s = |v: i32| -> i32 { (v as f32 * scale).round() as i32 };
 
-        let _ = RegisterClassW(&wnd_class);
-
-        let win_w = 640;
-        let win_h = 680;
+        let win_w = s(660);
+        let win_h = s(700);
         let screen_w = GetSystemMetrics(SM_CXSCREEN);
         let screen_h = GetSystemMetrics(SM_CYSCREEN);
         let pos_x = (screen_w - win_w) / 2;
         let pos_y = (screen_h - win_h) / 2;
 
         let title = to_wide_str("Bem-vindo ao Lexi! - Configuração Inicial");
+        let class_name = to_wide_str("LexiOnboardingDialogClass");
+        let purple_bg_brush = CreateSolidBrush(rgb(23, 16, 35));
+        let wnd_class = WNDCLASSW {
+            lpfnWndProc: Some(onboarding_wnd_proc),
+            lpszClassName: PCWSTR(class_name.as_ptr()),
+            hbrBackground: purple_bg_brush,
+            ..Default::default()
+        };
+
+        let _ = RegisterClassW(&wnd_class);
+
         let hwnd = match CreateWindowExW(
             Default::default(),
             PCWSTR(class_name.as_ptr()),
@@ -186,19 +200,27 @@ unsafe extern "system" fn onboarding_wnd_proc(
 ) -> LRESULT {
     match msg {
         windows::Win32::UI::WindowsAndMessaging::WM_CREATE => {
+            let dpi = windows::Win32::UI::HiDpi::GetDpiForSystem();
+            let scale = if dpi != 0 { (dpi as f32 / 96.0).max(1.0) } else { 1.0 };
+            let s = |v: i32| -> i32 { (v as f32 * scale).round() as i32 };
+
             let font_name = to_wide_str("Segoe UI");
+            let font_title = -((18.0 * scale).round() as i32).min(-16);
+            let font_bold = -((13.0 * scale).round() as i32).min(-12);
+            let font_h = -((13.0 * scale).round() as i32).min(-12);
+
             let hfont_title = CreateFontW(
-                -18, 0, 0, 0, 700, 0, 0, 0,
+                font_title, 0, 0, 0, 700, 0, 0, 0,
                 DEFAULT_CHARSET.0 as u32, 0, 0, 0, 0,
                 PCWSTR(font_name.as_ptr()),
             );
             let hfont_bold = CreateFontW(
-                -13, 0, 0, 0, 700, 0, 0, 0,
+                font_bold, 0, 0, 0, 700, 0, 0, 0,
                 DEFAULT_CHARSET.0 as u32, 0, 0, 0, 0,
                 PCWSTR(font_name.as_ptr()),
             );
             let hfont = CreateFontW(
-                -13, 0, 0, 0, 400, 0, 0, 0,
+                font_h, 0, 0, 0, 400, 0, 0, 0,
                 DEFAULT_CHARSET.0 as u32, 0, 0, 0, 0,
                 PCWSTR(font_name.as_ptr()),
             );
@@ -216,7 +238,7 @@ unsafe extern "system" fn onboarding_wnd_proc(
                     PCWSTR(class.as_ptr()),
                     PCWSTR(t_wide.as_ptr()),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(style),
-                    x, y, w, h,
+                    s(x), s(y), s(w), s(h),
                     hwnd,
                     HMENU(id as *mut _),
                     None,
@@ -287,7 +309,7 @@ unsafe extern "system" fn onboarding_wnd_proc(
 
             make_ctrl(&static_class, "Tecla de Gatilho:", WS_CHILD.0 | WS_VISIBLE.0, 32, 355, 160, 18, 0);
             let h_combo_hotkey = make_ctrl(&combo_class, "", WS_CHILD.0 | WS_VISIBLE.0 | CBS_DROPDOWNLIST as u32, 200, 352, 200, 160, 105);
-            let hotkeys = ["F9 (Recomendado)", "CapsLock (Fácil alcance)", "F13", "Ctrl + Espaço", "F8", "F10", "ScrollLock"];
+            let hotkeys = ["Ctrl+Space (Recomendado)", "F9", "CapsLock (Fácil alcance)", "F13", "Alt+Space", "F8", "F10", "ScrollLock"];
             for hk in &hotkeys {
                 let h_wide = to_wide_str(hk);
                 SendMessageW(h_combo_hotkey, CB_ADDSTRING, WPARAM(0), LPARAM(h_wide.as_ptr() as isize));
@@ -411,7 +433,7 @@ unsafe extern "system" fn onboarding_wnd_proc(
 
                         // 3. Hotkey
                         let hk_idx = SendMessageW(HWND(state.h_combo_hotkey as *mut _), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 as usize;
-                        let hotkey_vals = ["F9", "CapsLock", "F13", "Ctrl+Space", "F8", "F10", "ScrollLock"];
+                        let hotkey_vals = ["Ctrl+Space", "F9", "CapsLock", "F13", "Alt+Space", "F8", "F10", "ScrollLock"];
                         if let Some(&hk) = hotkey_vals.get(hk_idx) {
                             config.stt.hotkey = hk.to_string();
                         }
@@ -450,10 +472,38 @@ unsafe extern "system" fn onboarding_wnd_proc(
             LRESULT(0)
         }
 
-        WM_CTLCOLORSTATIC | WM_CTLCOLORDLG | WM_CTLCOLORBTN => {
+        WM_CTLCOLORDLG => {
+            let hbrush = CreateSolidBrush(rgb(23, 16, 35));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLORSTATIC => {
             let hdc = HDC(wparam.0 as *mut _);
             SetBkMode(hdc, TRANSPARENT);
-            LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+            SetTextColor(hdc, rgb(235, 225, 252)); // Lavender RGB(235, 225, 252)
+            let hbrush = CreateSolidBrush(rgb(23, 16, 35));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLOREDIT => {
+            let hdc = HDC(wparam.0 as *mut _);
+            SetBkColor(hdc, rgb(38, 26, 60)); // Dark Purple
+            SetTextColor(hdc, rgb(255, 255, 255)); // White
+            let hbrush = CreateSolidBrush(rgb(38, 26, 60));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLORLISTBOX => {
+            let hdc = HDC(wparam.0 as *mut _);
+            SetBkColor(hdc, rgb(38, 26, 60));
+            SetTextColor(hdc, rgb(255, 255, 255));
+            let hbrush = CreateSolidBrush(rgb(38, 26, 60));
+            LRESULT(hbrush.0 as isize)
+        }
+
+        WM_CTLCOLORBTN => {
+            let hbrush = CreateSolidBrush(rgb(23, 16, 35));
+            LRESULT(hbrush.0 as isize)
         }
 
         WM_DESTROY => {
